@@ -10,6 +10,7 @@
 - [限制说明](#限制说明)
 - [快速开始](#快速开始)
 - [配置说明](#配置说明)
+- [支持的模型](#支持的模型)
 - [API 端点](#api-端点)
 - [Token 管理机制](#token-管理机制)
 - [架构原理](#架构原理)
@@ -245,6 +246,103 @@ tools:
   - run_python
   - run_shell
   - json_parse
+```
+
+---
+
+## 支持的模型
+
+### 模型列表
+
+代理通过 AugLoop WebSocket 协议将请求转发给 Microsoft 云端，实际使用的 AI 模型由 **服务端 flights 配置决定**。代理会透传客户端请求中的 `model` 字段，但最终是否使用该模型取决于服务端。
+
+#### 已知支持的模型
+
+| 模型 | model 参数 | 说明 |
+|------|-----------|------|
+| **Claude Opus 4.8** | `claude-opus-4.8` | 代理默认模型（代码内置），Anthropic Claude Opus 系列 |
+| **Claude Opus 5** | `claude-opus-5` | 日志确认可用，Anthropic 最新 Opus 系列 |
+| **GPT-5** | `gpt-5` | OpenAI GPT-5，flights 中 `EAELlmModelId:135` |
+| **GPT-5.4** | `gpt-5.4` | flights 中 `Gpt54AgentVariant` + `Gpt54 PromptVariant` |
+| **GLM-5.2** | `glm-5.2` | 日志确认可用，智谱 GLM 系列（可能通过 Avalon 路由） |
+
+#### Flights 配置中的模型 Slot
+
+以下信息从 `flights.txt` 中提取，反映了 Microsoft 后端的模型路由配置：
+
+**Claude 系列：**
+
+| Slot | Model ID | 说明 |
+|------|----------|------|
+| Claude Slot 1 | 137 | `EAELlmClaudeSlot1ModelId` |
+| Claude Slot 2 | 147 | `EAELlmClaudeSlot2ModelId`（Opus 4.8） |
+| Claude Slot 5 | 156 | `EAELlmClaudeSlot5ModelId` |
+
+**GPT 系列：**
+
+| Slot | Model ID | 说明 |
+|------|----------|------|
+| GPT-5 Slot 1 | 135 | `EAELlmGpt5Slot1ModelId` |
+| GPT-5 Slot 2 | 148 | `EAELlmGpt5Slot2ModelId` |
+| EU 默认 | 135 | `EAELlmEUModelId` |
+
+#### Agent Mode 变体
+
+| 变体 | 说明 |
+|------|------|
+| `ClaudeAgentVariant` | Claude 通用变体 |
+| `ClaudeOpus46AgentVariant` | Claude Opus 4.6 变体 |
+| `ClaudeSlot1AgentVariant` | Claude Slot 1 变体 |
+| `ClaudeSlot2AgentVariant` | Claude Slot 2 变体 |
+| `Gpt5AgentVariant` | GPT-5 通用变体 |
+| `Gpt54AgentVariant` | GPT-5.4 变体 |
+| `Gpt5Slot1AgentVariant` | GPT-5 Slot 1 变体 |
+
+### 模型选择机制
+
+```
+客户端请求 (model: "claude-opus-5")
+    │
+    ▼
+代理透传 model 字段到 AugLoop ChatSignal
+    │
+    ▼
+AugLoop 服务端根据 flights 配置路由到对应模型
+    │
+    ├─ model 匹配 → 使用指定模型
+    └─ model 不匹配 → 回退到默认模型 (GPT-5, ModelId:135)
+```
+
+> **注意**：代理无法控制最终使用哪个模型。`model` 参数仅作为提示传递给 AugLoop 服务端，实际模型由 Microsoft 云端根据 flights 配置和负载情况决定。代理默认使用 `claude-opus-4.8`（代码内置）。
+
+### 使用示例
+
+```python
+import openai
+
+client = openai.OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="any")
+
+# 使用默认模型 (claude-opus-4.8)
+response = client.chat.completions.create(
+    model="copilot",
+    messages=[{"role": "user", "content": "你好"}],
+)
+
+# 指定模型
+response = client.chat.completions.create(
+    model="claude-opus-5",
+    messages=[{"role": "user", "content": "你好"}],
+)
+```
+
+### 模型可用性查询
+
+```bash
+# 查看当前服务端返回的模型列表
+curl http://127.0.0.1:8080/v1/models
+
+# 查看代理状态 (含当前模型)
+curl http://127.0.0.1:8080/status
 ```
 
 ---
