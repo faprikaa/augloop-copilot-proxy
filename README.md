@@ -258,13 +258,13 @@ tools:
 
 #### 已知支持的模型
 
-| 模型 | model 参数 | 说明 |
-|------|-----------|------|
-| **Claude Opus 4.8** | `claude-opus-4.8` | 代理默认模型（代码内置），Anthropic Claude Opus 系列 |
-| **Claude Opus 5** | `claude-opus-5` | 日志确认可用，Anthropic 最新 Opus 系列 |
-| **GPT-5** | `gpt-5` | OpenAI GPT-5，flights 中 `EAELlmModelId:135` |
-| **GPT-5.4** | `gpt-5.4` | flights 中 `Gpt54AgentVariant` + `Gpt54 PromptVariant` |
-| **GLM-5.2** | `glm-5.2` | 日志确认可用，智谱 GLM 系列（可能通过 Avalon 路由） |
+| 模型 | 厂商 | model 参数 | 说明 |
+|------|------|-----------|------|
+| **GPT-5.5** | OpenAI | `gpt-5.5` | OpenAI 最新 GPT 系列 |
+| **GPT-5.6** | OpenAI | `gpt-5.6` | OpenAI 最新 GPT 系列 |
+| **Claude Opus 4.8** | Anthropic | `claude-opus-4.8` | 代理默认模型（代码内置），Anthropic Claude Opus 系列 |
+| **Claude Opus 5** | Anthropic | `claude-opus-5` | Anthropic 最新 Opus 系列 |
+| **Claude Sonnet 5** | Anthropic | `claude-sonnet-5` | Anthropic Claude Sonnet 系列 |
 
 #### Flights 配置中的模型 Slot
 
