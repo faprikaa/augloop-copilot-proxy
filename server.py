@@ -34,6 +34,7 @@ server.py - OpenAI 兼容的 AugLoop Copilot 反向代理服务器 (v2)
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -93,7 +94,16 @@ if token_manager.has_token:
 
 augloop = AugLoopClient(config)
 ws_client = AugLoopWSClient(config)
-prompt_stripper = PromptStripper()
+# 读取自定义系统提示词（环境变量，与 prompt_proxy 共享）
+_custom_prompt = os.environ.get("CUSTOM_SYSTEM_PROMPT", "")
+_custom_file = os.environ.get("CUSTOM_SYSTEM_PROMPT_FILE", "")
+if _custom_file and os.path.exists(_custom_file):
+    try:
+        with open(_custom_file, "r", encoding="utf-8") as _f:
+            _custom_prompt = _f.read().strip()
+    except Exception:
+        pass
+prompt_stripper = PromptStripper(custom_system_prompt=_custom_prompt)
 tool_registry = ToolRegistry()
 conversation_store = ConversationStore(str(DB_PATH))
 

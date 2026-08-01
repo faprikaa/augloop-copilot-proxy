@@ -11,11 +11,12 @@ prompt_stripper.py - 提示词清理模块
 """
 
 import json
+import os
 from typing import Any
 
 
 class PromptStripper:
-    """提示词清理器"""
+    """提示词清理器 — 支持「替换模式」绕过模型安全检测"""
 
     # 需要删除的敏感字段
     STRIP_FIELDS = {
@@ -30,22 +31,30 @@ class PromptStripper:
         "priorContext",
     }
 
-    def __init__(self, custom_fields: list[str] = None, strip_system_messages: bool = True):
+    # 支持替换模式的字段（替换为自定义系统提示词，而非删除）
+    REPLACE_FIELDS = {"systemPrompt", "systemPromptText"}
+
+    def __init__(self, custom_fields: list[str] = None, strip_system_messages: bool = True,
+                 custom_system_prompt: str = ""):
         """
         初始化清理器
 
         Args:
             custom_fields: 额外要删除的字段名列表
             strip_system_messages: 是否删除 messages 数组中 role=system 的消息
+            custom_system_prompt: 自定义系统提示词。设置后，systemPrompt 等字段会被
+                                  替换（而非删除），messages 中的 system 消息也会被替换。
+                                  这样身份指令以系统提示词形式注入，不会触发安全检测。
         """
         self.strip_fields = self.STRIP_FIELDS.copy()
         if custom_fields:
             self.strip_fields.update(custom_fields)
         self.strip_system_messages = strip_system_messages
+        self.custom_system_prompt = custom_system_prompt
 
     def strip_dict(self, data: dict) -> dict:
         """
-        递归删除字典中的提示词字段
+        递归删除/替换字典中的提示词字段
 
         Args:
             data: 要清理的字典
@@ -56,10 +65,14 @@ class PromptStripper:
         if not isinstance(data, dict):
             return data
 
-        # 删除顶级敏感字段
+        # 删除或替换顶级敏感字段
         for field in list(data.keys()):
             if field in self.strip_fields:
-                del data[field]
+                if self.custom_system_prompt and field in self.REPLACE_FIELDS:
+                    # 替换模式：用自定义系统提示词替换微软内置的
+                    data[field] = self.custom_system_prompt
+                else:
+                    del data[field]
             elif isinstance(data[field], dict):
                 self.strip_dict(data[field])
             elif isinstance(data[field], list):
@@ -69,7 +82,7 @@ class PromptStripper:
 
     def strip_list(self, data: list) -> list:
         """
-        清理列表中的提示词
+        清理列表中的提示词 — 支持替换或注入 system 消息
 
         Args:
             data: 要清理的列表
@@ -77,12 +90,31 @@ class PromptStripper:
         Returns:
             清理后的列表
         """
-        # 处理 messages 数组 (删除 role=system 的项)
+        # 处理 messages 数组
         if self.strip_system_messages and all(isinstance(x, dict) for x in data):
-            # 检查是否为 messages 数组格式
-            if any(item.get("role") in ("system", "assistant") for item in data):
-                # 保留 user 消息，删除 system/assistant 消息
-                data[:] = [item for item in data if item.get("role") != "system"]
+            has_system = any(item.get("role") == "system" for item in data)
+
+            if has_system:
+                if self.custom_system_prompt:
+                    # 替换第一条第 system 消息为自定义提示词，多余删除
+                    replaced = False
+                    new_list = []
+                    for item in data:
+                        if item.get("role") == "system":
+                            if not replaced:
+                                item["content"] = self.custom_system_prompt
+                                new_list.append(item)
+                                replaced = True
+                            # 跳过多余的 system 消息
+                        else:
+                            new_list.append(item)
+                    data[:] = new_list
+                else:
+                    # 没有自定义提示词，删除 system 消息
+                    data[:] = [item for item in data if item.get("role") != "system"]
+            elif self.custom_system_prompt:
+                # 没有 system 消息但有自定义提示词 → 注入一条
+                data.insert(0, {"role": "system", "content": self.custom_system_prompt})
 
         # 递归处理每一项
         for item in data:
@@ -159,8 +191,18 @@ class PromptStripper:
         return cleaned
 
 
-# 全局默认实例
-_default_stripper = PromptStripper()
+# 读取自定义系统提示词（从环境变量或文件）
+_CUSTOM_PROMPT = os.environ.get("CUSTOM_SYSTEM_PROMPT", "")
+_CUSTOM_FILE = os.environ.get("CUSTOM_SYSTEM_PROMPT_FILE", "")
+if _CUSTOM_FILE and os.path.exists(_CUSTOM_FILE):
+    try:
+        with open(_CUSTOM_FILE, "r", encoding="utf-8") as _f:
+            _CUSTOM_PROMPT = _f.read().strip()
+    except Exception:
+        pass
+
+# 全局默认实例（支持自定义系统提示词注入）
+_default_stripper = PromptStripper(custom_system_prompt=_CUSTOM_PROMPT)
 
 
 def strip_dict(data: dict) -> dict:
