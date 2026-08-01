@@ -1,0 +1,40 @@
+# ── 敏感文件 (含 Token / 个人信息) ──
+.augloop_token
+config.yaml
+conversations.db
+conversations.db-shm
+conversations.db-wal
+
+# ── 日志文件 ──
+*.log
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# ── 虚拟环境 ──
+venv/
+.venv/
+env/
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── 系统 ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 缓存 ──
+.pytest_cache/
+.mypy_cache/

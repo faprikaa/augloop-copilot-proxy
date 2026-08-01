@@ -1,0 +1,21 @@
+# AugLoop Copilot Proxy v2 - Dependencies
+# Python 3.10+ required (tested on 3.12)
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# HTTP / WebSocket clients
+httpx>=0.25.0
+aiohttp>=3.9.0
+websockets>=12.0
+
+# Config & data
+pyyaml>=6.0
+pydantic>=2.0.0
+
+# Windows-specific (memory scanning, COM automation)
+pywin32>=306; sys_platform == 'win32'
+
+# Optional: MSAL for WAM token acquisition strategy
+msal[broker]>=1.28.0; sys_platform == 'win32'

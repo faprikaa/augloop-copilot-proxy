@@ -1,0 +1,71 @@
+# AugLoop Copilot Proxy v2 - 配置模板
+# 复制此文件为 config.yaml 并填入你的信息
+# 大部分字段会在首次运行时自动填充
+
+server:
+  host: 127.0.0.1
+  port: 8080
+  api_key: ''             # 留空表示不需要 API 认证; 填入字符串则所有请求需携带 Authorization: Bearer <key>
+
+augloop:
+  base_url: https://augloop.svc.cloud.microsoft
+  workflow: OfficeCopilotOrchestrationWorkflow
+  bearer_token: ''        # JWE Token (自动获取, 无需手动填写)
+  auth_token: ''          # JWT Token (自动获取, 无需手动填写)
+  x_client_metadata: ''   # 客户端元数据 (自动获取, 含 flights 配置)
+  x_office_session_id: '' # Office 会话 ID (自动生成)
+  copilot_license_type: ConsumerPro
+  proxy_url: ''           # 代理服务器 URL (如需通过代理访问 AugLoop)
+  strip_prompts: true     # 去除系统提示词中的 Copilot 包装
+  chat:
+    message_field: promptText
+    output_type: AugLoop_OfficeCopilotOrchestration_CopilotChatResponse
+    prompt_type: UserPrompt
+    response_field: response
+    signal_base:
+    - AugLoop_Signals_Signal
+    signal_type: AugLoop_OfficeCopilotOrchestration_CopilotChatSignal
+  chat_fallback_prompt_types:
+  - UserPrompt
+  - Chat
+  - ConversationMessage
+  - Prompt
+  prompts:
+    output_type: AugLoop_OfficeCopilotOrchestration_CopilotPrompts
+    prompt_type: DynamicActionButton
+    signal_base:
+    - AugLoop_Signals_Signal
+    signal_type: AugLoop_OfficeCopilotOrchestration_CopilotPromptsSignal
+
+conversation:
+  db_path: conversations.db
+  max_messages: 1000
+
+graph_api:
+  base_url: https://graph.microsoft.com
+  bearer_token: ''        # Graph API Token (可选, 用于 Copilot Uploads 功能)
+  copilot_uploads_path: /v1.0/me/drive/special/copilotuploads
+
+token_manager:
+  auto_refresh: true
+  refresh_interval: 120              # 检查间隔 (秒), 每 2 分钟检查 Token 状态
+  preemptive_refresh_threshold: 600  # 提前刷新阈值 (秒), 剩余时间少于此值就主动刷新
+  strategies:                        # Token 获取策略优先级 (从上到下尝试)
+  - auto     # 内存扫描 Excel 进程 (需要 Excel 运行, 推荐)
+  - wam      # MSAL.NET broker 静默获取
+  - har      # 从 HAR 文件提取
+  - mitm     # 从 .augloop_token 文件读取
+  - frida    # Frida 内存扫描 (需要安装 frida)
+
+tools:
+  enabled: true
+  max_iterations: 5
+  builtin_tools:
+  - get_current_time
+  - http_get
+  - read_file
+  - write_file
+  - list_directory
+  - run_python
+  - run_shell
+  - json_parse
