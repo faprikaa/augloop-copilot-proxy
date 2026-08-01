@@ -699,8 +699,8 @@ class AugLoopWSClient:
         """构建聊天请求消息 (CopilotChatSignal)"""
         return self._build_copilot_chat_message(query, messages, msg_id, signal_id, model, system_prompt)
 
-    async def _connect_ws(self, ws_url: str) -> aiohttp.ClientWebSocketResponse | None:
-        """连接到 WebSocket 服务器"""
+    async def _connect_ws(self, ws_url: str, timeout: float = 10.0) -> aiohttp.ClientWebSocketResponse | None:
+        """连接到 WebSocket 服务器 (带超时, 快速失败)"""
         ssl_ctx = ssl.create_default_context()
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
@@ -710,7 +710,21 @@ class AugLoopWSClient:
 
         try:
             if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession()
+                connector = aiohttp.TCPConnector(
+                    force_close=True,
+                    enable_cleanup_closed=True,
+                    limit=0,
+                )
+                timeout_cfg = aiohttp.ClientTimeout(
+                    total=None,
+                    connect=timeout,
+                    sock_connect=timeout,
+                    sock_read=None,
+                )
+                self._session = aiohttp.ClientSession(
+                    connector=connector,
+                    timeout=timeout_cfg,
+                )
 
             ws = await self._session.ws_connect(
                 ws_url,
@@ -720,6 +734,7 @@ class AugLoopWSClient:
                 max_msg_size=0,
                 heartbeat=30,
                 compress=0,
+                timeout=timeout,
             )
             return ws
         except Exception as e:
@@ -1104,19 +1119,25 @@ class AugLoopWSClient:
             logger.error("未获取到 sliceUrl")
             return False
 
-        # ── 阶段 2: Slice 服务器 (带重试: AugLoop 随机分配区域服务器, 部分网络不通) ──
-        # japaneast 只能直连, northeurope 只能代理 — 重试可重新分配到可达的服务器
+        # ── 阶段 2: Slice 服务器 (带重试: 瞬时网络抖动直接重试, 多次失败才重做 Phase 1) ──
         slice_max_retries = 3
         for slice_attempt in range(slice_max_retries):
             logger.info("[阶段2] 连接 slice 服务器 (尝试 %d/%d): %s",
                         slice_attempt + 1, slice_max_retries, self._slice_url[:80])
-            self._ws = await self._connect_ws(self._slice_url)
+            self._ws = await self._connect_ws(self._slice_url, timeout=10.0)
             if self._ws:
                 break  # 连接成功
 
-            # slice 连接失败 — 关闭 main_ws, 重新走 Phase 1 获取新 sliceUrl
+            # slice 连接失败
             if slice_attempt < slice_max_retries - 1:
-                logger.warning("[阶段2] slice 连接失败, 重新走 Phase 1 获取新 sliceUrl...")
+                # 前两次: 短暂等待后直接重试同一 URL (瞬时网络抖动)
+                if slice_attempt == 0:
+                    logger.warning("[阶段2] slice 连接失败 (瞬时网络?), 等待 1s 后直接重试...")
+                    await asyncio.sleep(1)
+                    continue
+
+                # 第三次: 重新走 Phase 1 获取新 sliceUrl (可能分配到不同区域)
+                logger.warning("[阶段2] slice 连接失败多次, 重新走 Phase 1 获取新 sliceUrl...")
                 if self._main_ws and not self._main_ws.closed:
                     try:
                         await self._main_ws.close()
