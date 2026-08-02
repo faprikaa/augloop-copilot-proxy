@@ -899,4 +899,4 @@ copilot_proxy/
 
 ## 致谢
 
-- LinuxDo 社区 — 逆向思路与技术支持
+- [LinuxDo 社区](https://linux.do/)
