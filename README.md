@@ -705,7 +705,7 @@ A: 不会。反代通过独立的 WebSocket 连接 AugLoop，不干扰 Excel 的
 
 **Q: 为什么 AI 总说自己是"Excel 助手"？**
 
-A: 系统提示词由 Microsoft 云端注入，代理无法修改。`prompt_stripper.py` 可以删除请求中的部分提示词，但云端注入的系统人格无法改变。
+A: 系统提示词由 Microsoft 云端注入，代理无法修改。`prompt_stripper.py` 可以删除请求中的部分提示词，但云端注入的系统人格无法改变。**2026-08-03 已实测证实**（见 `TEST_REPORT_2026-08-03.md`）：即使在 WebSocket 帧层做 MITM 改写（注入 system 消息 + systemPrompt 字段 + 前置指令到 query），模型也会看到注入内容并明确拒绝，维持 Excel 人格——服务端系统提示词优先级高于客户端一切字段。
 
 **Q: 支持流式输出吗？**
 
