@@ -2347,6 +2347,29 @@ async def _stream_anthropic_sse(
     yield f"event: message_stop\ndata: {json.dumps(msg_stop, ensure_ascii=False)}\n\n"
 
 
+@app.post("/v1/messages/count_tokens")
+async def anthropic_count_tokens(request: Request):
+    """Anthropic token counting: POST /v1/messages/count_tokens
+
+    Returns a rough estimate (4 chars per token); Claude Code calls this
+    frequently and only needs a plausible number.
+    """
+    _check_anthropic_api_key(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    text = _parse_anthropic_system(body.get("system"))
+    for m in body.get("messages") or []:
+        if isinstance(m, dict):
+            text += "\n" + _parse_anthropic_content(m.get("content"))
+    if body.get("tools"):
+        text += json.dumps(body["tools"], ensure_ascii=False)
+    return {"input_tokens": _estimate_tokens(text)}
+
+
 @app.post("/v1/messages")
 async def anthropic_messages(req: AnthropicMessagesRequest, request: Request):
     """Anthropic Messages API: POST /v1/messages
