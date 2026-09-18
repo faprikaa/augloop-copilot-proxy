@@ -2404,21 +2404,31 @@ async def anthropic_messages(req: AnthropicMessagesRequest, request: Request):
         # Parse system prompt
         system_prompt = _parse_anthropic_system(req.system)
 
-        # Parse messages: extract last user message and history
+        # Parse messages: the prompt is the LAST user message with text; everything
+        # before it is history. Trailing assistant messages (prefill) are dropped.
+        parsed = [(m.role, _parse_anthropic_content(m.content)) for m in req.messages]
+        last_user_idx = next(
+            (i for i in range(len(parsed) - 1, -1, -1)
+             if parsed[i][0] == "user" and parsed[i][1].strip()),
+            None,
+        )
         user_message = ""
         history: list[dict] = []
-
-        for i, msg in enumerate(req.messages):
-            content_text = _parse_anthropic_content(msg.content)
-            if msg.role == "user":
-                if i < len(req.messages) - 1:
-                    history.append({"role": "user", "content": content_text})
-                else:
-                    user_message = content_text
-            elif msg.role == "assistant":
-                history.append({"role": "assistant", "content": content_text})
+        if last_user_idx is not None:
+            user_message = parsed[last_user_idx][1]
+            history = [
+                {"role": r, "content": t}
+                for r, t in parsed[:last_user_idx]
+                if r in ("user", "assistant") and t.strip()
+            ]
 
         if not user_message:
+            logger.warning(
+                "Anthropic Messages API: no user text; model=%s roles=%s content_types=%s",
+                req.model,
+                [r for r, _ in parsed],
+                [type(m.content).__name__ for m in req.messages],
+            )
             raise HTTPException(status_code=400, detail={
                 "type": "invalid_request_error",
                 "message": "No user message found in messages",
