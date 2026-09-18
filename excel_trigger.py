@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-excel_trigger.py - 自动触发 Excel Copilot 刷新 JWE Token
+excel_trigger.py - Automatically trigger Excel Copilot to refresh JWE Token
 
-当内存中的 JWE Token 过期时，通过 Windows UI Automation 触发
-Excel Copilot 侧栏，使 Excel 自动向微软请求新的 JWE Token。
+When the JWE Token in memory expires, this triggers the Excel Copilot sidebar
+via Windows UI Automation, causing Excel to automatically request a new JWE Token from Microsoft.
 
-原理:
-  1. 找到 Excel 主窗口
-  2. 将 Excel 带到前台
-  3. 发送 Copilot 快捷键 (Alt+Y) 打开 Copilot 侧栏
-  4. 等待 Excel 刷新 Token (~3-5 秒)
-  5. Token 刷新后可通过 memory_token_scanner 重新扫描
+Mechanism:
+  1. Locate the Excel main window
+  2. Bring Excel to the foreground
+  3. Send Copilot shortcut (Alt+Y) to open Copilot sidebar
+  4. Wait for Excel to refresh Token (~3-5 seconds)
+  5. Rescan memory via memory_token_scanner once Token is refreshed
 
-用法:
+Usage:
   from excel_trigger import trigger_excel_token_refresh
-  trigger_excel_token_refresh()  # 触发刷新，等待新 Token
+  trigger_excel_token_refresh()  # Trigger refresh and wait for new Token
 """
 
 import ctypes
@@ -30,7 +30,7 @@ logger = logging.getLogger("excel_trigger")
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
-# SetForegroundWindow 需要
+# SetForegroundWindow requirements
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.SetForegroundWindow.restype = wintypes.BOOL
 
@@ -80,21 +80,21 @@ VK_Y = 0x59
 
 
 def find_excel_window() -> int:
-    """查找 Excel 主窗口句柄"""
+    """Find Excel main window handle (HWND)"""
     excel_hwnd = None
 
     def enum_callback(hwnd, lparam):
         nonlocal excel_hwnd
-        # 检查窗口标题
+        # Check window title
         title = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, title, 256)
         if "excel" in title.value.lower():
-            # 检查窗口所属进程
+            # Check window process ID
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value:
                 excel_hwnd = hwnd
-                logger.info("找到 Excel 窗口: HWND=%d, Title=%s, PID=%d",
+                logger.info("Found Excel window: HWND=%d, Title=%s, PID=%d",
                            hwnd, title.value[:50], pid.value)
         return True
 
@@ -103,25 +103,25 @@ def find_excel_window() -> int:
 
 
 def bring_to_foreground(hwnd: int) -> bool:
-    """将窗口带到前台"""
-    # 如果最小化了，先恢复
+    """Bring window to foreground"""
+    # Restore if minimized
     if user32.IsIconic(hwnd):
         user32.ShowWindow(hwnd, SW_RESTORE)
         time.sleep(0.5)
 
-    # 尝试设置前台
+    # Attempt to set foreground
     fg_hwnd = user32.GetForegroundWindow()
     if fg_hwnd == hwnd:
         return True
 
-    # 使用 ALT 键 trick 绕过前台限制
+    # Use ALT key trick to bypass foreground lock restrictions
     user32.PostMessageW(hwnd, WM_SYSKEYDOWN, VK_MENU, 0)
     user32.PostMessageW(hwnd, WM_SYSKEYUP, VK_MENU, 0)
     time.sleep(0.1)
 
     result = user32.SetForegroundWindow(hwnd)
     if not result:
-        logger.warning("SetForegroundWindow 失败, 尝试 ShowWindow")
+        logger.warning("SetForegroundWindow failed, attempting ShowWindow")
         user32.ShowWindow(hwnd, SW_SHOW)
         time.sleep(0.5)
         user32.SetForegroundWindow(hwnd)
@@ -131,10 +131,10 @@ def bring_to_foreground(hwnd: int) -> bool:
 
 
 def send_copilot_shortcut(hwnd: int):
-    """发送 Copilot 快捷键 (Alt+Y) 打开 Copilot 侧栏"""
-    logger.info("发送 Alt+Y 快捷键打开 Copilot...")
+    """Send Copilot shortcut (Alt+Y) to open Copilot sidebar"""
+    logger.info("Sending Alt+Y shortcut to open Copilot...")
 
-    # 方法 1: PostMessage (不阻塞, 但可能不工作如果窗口不在前台)
+    # Method 1: PostMessage (non-blocking)
     user32.PostMessageW(hwnd, WM_SYSKEYDOWN, VK_MENU, 0)
     time.sleep(0.05)
     user32.PostMessageW(hwnd, WM_SYSKEYDOWN, VK_Y, 0)
@@ -143,72 +143,72 @@ def send_copilot_shortcut(hwnd: int):
     time.sleep(0.05)
     user32.PostMessageW(hwnd, WM_SYSKEYUP, VK_MENU, 0)
 
-    logger.info("快捷键已发送")
+    logger.info("Shortcut sent")
 
 
 def trigger_excel_token_refresh(wait_seconds: int = 5) -> bool:
     """
-    触发 Excel 刷新 JWE Token
+    Trigger Excel to refresh JWE Token
 
-    通过发送 Alt+Y 快捷键打开 Copilot 侧栏，
-    使 Excel 连接 AugLoop 服务并刷新 Token。
+    Sends Alt+Y shortcut to open Copilot sidebar,
+    prompting Excel to connect to AugLoop service and refresh its Token.
 
     Args:
-        wait_seconds: 发送快捷键后等待的秒数
+        wait_seconds: Seconds to wait after sending shortcut
 
     Returns:
-        True 如果成功触发 (不保证 Token 已刷新)
+        True if successfully triggered (does not guarantee Token is refreshed)
     """
     hwnd = find_excel_window()
     if not hwnd:
-        logger.error("未找到 Excel 窗口! 请先启动 Excel。")
+        logger.error("Excel window not found! Please start Excel first.")
         return False
 
-    logger.info("找到 Excel 窗口 (HWND=%d), 尝试带到前台...", hwnd)
+    logger.info("Found Excel window (HWND=%d), attempting to bring to foreground...", hwnd)
 
-    # 带到前台
+    # Bring to foreground
     fg_ok = bring_to_foreground(hwnd)
     if not fg_ok:
-        logger.warning("无法将 Excel 带到前台, 尝试直接发送快捷键...")
+        logger.warning("Could not bring Excel to foreground, attempting direct shortcut send...")
 
-    # 发送 Copilot 快捷键
+    # Send Copilot shortcut
     send_copilot_shortcut(hwnd)
 
-    # 等待 Excel 刷新 Token
-    logger.info("等待 %d 秒让 Excel 刷新 Token...", wait_seconds)
+    # Wait for Excel to refresh Token
+    logger.info("Waiting %d seconds for Excel to refresh Token...", wait_seconds)
     time.sleep(wait_seconds)
 
-    logger.info("[OK] 触发完成, Excel 应已刷新 Token")
+    logger.info("[OK] Trigger complete, Excel should have refreshed Token")
     return True
 
 
 def trigger_and_rescan(wait_seconds: int = 5) -> dict:
     """
-    触发 Excel 刷新 Token 并重新扫描内存
+    Trigger Excel to refresh Token and rescan memory
 
     Returns:
-        {"jwe": "token...", "jwt": "token..."} 或空 dict
+        {"jwe": "token...", "jwt": "token..."} or empty dict
     """
     from memory_token_scanner import scan_once
 
-    # 先记录当前 Token
+    # Record current Token
     old_tokens = scan_once(find_all=False)
     old_jwe = old_tokens.get("jwe", "")
 
-    # 触发 Excel
+    # Trigger Excel
     success = trigger_excel_token_refresh(wait_seconds)
     if not success:
         return {}
 
-    # 重新扫描
-    logger.info("重新扫描内存...")
+    # Rescan
+    logger.info("Rescanning memory...")
     new_tokens = scan_once(find_all=False)
 
     new_jwe = new_tokens.get("jwe", "")
     if new_jwe and new_jwe != old_jwe:
-        logger.info("[★] 检测到新 JWE Token! (%d chars)", len(new_jwe))
+        logger.info("[★] Detected new JWE Token! (%d chars)", len(new_jwe))
     else:
-        logger.info("JWE Token 未变化 (可能 Excel 未刷新或刷新后 Token 相同)")
+        logger.info("JWE Token unchanged (Excel may not have refreshed or token is identical)")
 
     return new_tokens
 
@@ -220,8 +220,8 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
 
-    print("=== Excel Token 刷新触发器 ===")
-    print("将发送 Alt+Y 快捷键到 Excel 以触发 Copilot...")
+    print("=== Excel Token Refresh Trigger ===")
+    print("Sending Alt+Y shortcut to Excel to trigger Copilot...")
     print()
 
     result = trigger_and_rescan(wait_seconds=5)
@@ -233,4 +233,4 @@ if __name__ == "__main__":
             print(f"\n[★] JWT Token: {result['jwt'][:80]}...")
             print(f"    Length: {len(result['jwt'])}")
     else:
-        print("\n[X] 未找到 Token")
+        print("\n[X] No Token found")

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-prompt_stripper.py - 提示词清理模块
+prompt_stripper.py - Prompt Sanitization Module
 
-负责从请求中删除硬编码的内置提示词，包括：
-  - systemPrompt / systemPromptText (系统提示词)
-  - promptCommand (命令提示词)
-  - instructions (指令)
-  - system role messages (role=system 的消息)
-  - 其他微软内置的提示词字段
+Responsible for stripping hardcoded built-in prompts from requests, including:
+  - systemPrompt / systemPromptText (system prompts)
+  - promptCommand (command prompts)
+  - instructions (directives)
+  - system role messages (messages with role=system)
+  - other Microsoft built-in prompt fields
 """
 
 import json
@@ -16,9 +16,9 @@ from typing import Any
 
 
 class PromptStripper:
-    """提示词清理器 — 支持「替换模式」绕过模型安全检测"""
+    """Prompt sanitizer — supports 'replace mode' to bypass model security checks"""
 
-    # 需要删除的敏感字段
+    # Sensitive fields to remove
     STRIP_FIELDS = {
         "systemPrompt",
         "systemPromptText",
@@ -31,20 +31,20 @@ class PromptStripper:
         "priorContext",
     }
 
-    # 支持替换模式的字段（替换为自定义系统提示词，而非删除）
+    # Fields that support replacement mode (replaced by custom system prompt rather than deleted)
     REPLACE_FIELDS = {"systemPrompt", "systemPromptText"}
 
     def __init__(self, custom_fields: list[str] = None, strip_system_messages: bool = True,
                  custom_system_prompt: str = ""):
         """
-        初始化清理器
+        Initialize the prompt stripper
 
         Args:
-            custom_fields: 额外要删除的字段名列表
-            strip_system_messages: 是否删除 messages 数组中 role=system 的消息
-            custom_system_prompt: 自定义系统提示词。设置后，systemPrompt 等字段会被
-                                  替换（而非删除），messages 中的 system 消息也会被替换。
-                                  这样身份指令以系统提示词形式注入，不会触发安全检测。
+            custom_fields: Extra list of field names to remove
+            strip_system_messages: Whether to remove messages with role=system in messages array
+            custom_system_prompt: Custom system prompt. When set, systemPrompt and related fields
+                                  will be replaced (not deleted), and system messages in messages
+                                  array will also be replaced.
         """
         self.strip_fields = self.STRIP_FIELDS.copy()
         if custom_fields:
@@ -54,22 +54,22 @@ class PromptStripper:
 
     def strip_dict(self, data: dict) -> dict:
         """
-        递归删除/替换字典中的提示词字段
+        Recursively delete / replace prompt fields in dictionary
 
         Args:
-            data: 要清理的字典
+            data: Dictionary to sanitize
 
         Returns:
-            清理后的字典（原地修改）
+            Sanitized dictionary (modified in-place)
         """
         if not isinstance(data, dict):
             return data
 
-        # 删除或替换顶级敏感字段
+        # Remove or replace top-level sensitive fields
         for field in list(data.keys()):
             if field in self.strip_fields:
                 if self.custom_system_prompt and field in self.REPLACE_FIELDS:
-                    # 替换模式：用自定义系统提示词替换微软内置的
+                    # Replace mode: replace Microsoft built-in prompt with custom system prompt
                     data[field] = self.custom_system_prompt
                 else:
                     del data[field]
@@ -82,21 +82,21 @@ class PromptStripper:
 
     def strip_list(self, data: list) -> list:
         """
-        清理列表中的提示词 — 支持替换或注入 system 消息
+        Sanitize prompts in a list — supports replacing or injecting system messages
 
         Args:
-            data: 要清理的列表
+            data: List to sanitize
 
         Returns:
-            清理后的列表
+            Sanitized list
         """
-        # 处理 messages 数组
+        # Process messages array
         if self.strip_system_messages and all(isinstance(x, dict) for x in data):
             has_system = any(item.get("role") == "system" for item in data)
 
             if has_system:
                 if self.custom_system_prompt:
-                    # 替换第一条第 system 消息为自定义提示词，多余删除
+                    # Replace the first system message with custom prompt, delete any extras
                     replaced = False
                     new_list = []
                     for item in data:
@@ -105,18 +105,18 @@ class PromptStripper:
                                 item["content"] = self.custom_system_prompt
                                 new_list.append(item)
                                 replaced = True
-                            # 跳过多余的 system 消息
+                            # Skip extra system messages
                         else:
                             new_list.append(item)
                     data[:] = new_list
                 else:
-                    # 没有自定义提示词，删除 system 消息
+                    # No custom prompt: delete system messages
                     data[:] = [item for item in data if item.get("role") != "system"]
             elif self.custom_system_prompt:
-                # 没有 system 消息但有自定义提示词 → 注入一条
+                # No system message but custom prompt exists → inject one
                 data.insert(0, {"role": "system", "content": self.custom_system_prompt})
 
-        # 递归处理每一项
+        # Recursively process each item
         for item in data:
             if isinstance(item, dict):
                 self.strip_dict(item)
@@ -127,31 +127,31 @@ class PromptStripper:
 
     def strip_json_string(self, json_str: str) -> str:
         """
-        清理 JSON 字符串中的提示词
+        Sanitize prompts in a JSON string
 
         Args:
-            json_str: JSON 格式的字符串
+            json_str: JSON formatted string
 
         Returns:
-            清理后的 JSON 字符串
+            Sanitized JSON string
         """
         try:
             data = json.loads(json_str)
             self.strip_dict(data)
             return json.dumps(data, ensure_ascii=False)
         except (json.JSONDecodeError, TypeError):
-            # 不是有效的 JSON，原样返回
+            # Not valid JSON, return as-is
             return json_str
 
     def strip_request_body(self, body: dict | str) -> dict | str:
         """
-        清理请求体中的提示词
+        Sanitize prompts in a request body
 
         Args:
-            body: 请求体（字典或 JSON 字符串）
+            body: Request body (dict or JSON string)
 
         Returns:
-            清理后的请求体
+            Sanitized request body
         """
         if isinstance(body, str):
             return self.strip_json_string(body)
@@ -162,13 +162,13 @@ class PromptStripper:
 
     def strip_messages(self, messages: list) -> list:
         """
-        特殊处理 OpenAI 格式的 messages 数组
+        Special handling for OpenAI-formatted messages array
 
         Args:
-            messages: messages 列表
+            messages: List of messages
 
         Returns:
-            清理后的 messages 列表
+            Sanitized list of messages
         """
         if not isinstance(messages, list):
             return messages
@@ -179,11 +179,11 @@ class PromptStripper:
                 cleaned.append(msg)
                 continue
 
-            # 跳过 system 消息
+            # Skip system messages
             if msg.get("role") == "system" and self.strip_system_messages:
                 continue
 
-            # 清理消息内容中的提示词字段
+            # Clean prompt fields in message content
             cleaned_msg = msg.copy()
             self.strip_dict(cleaned_msg)
             cleaned.append(cleaned_msg)
@@ -191,7 +191,7 @@ class PromptStripper:
         return cleaned
 
 
-# 读取自定义系统提示词（从环境变量或文件）
+# Read custom system prompt (from environment variables or file)
 _CUSTOM_PROMPT = os.environ.get("CUSTOM_SYSTEM_PROMPT", "")
 _CUSTOM_FILE = os.environ.get("CUSTOM_SYSTEM_PROMPT_FILE", "")
 if _CUSTOM_FILE and os.path.exists(_CUSTOM_FILE):
@@ -201,54 +201,54 @@ if _CUSTOM_FILE and os.path.exists(_CUSTOM_FILE):
     except Exception:
         pass
 
-# 全局默认实例（支持自定义系统提示词注入）
+# Global default instance (supports custom system prompt injection)
 _default_stripper = PromptStripper(custom_system_prompt=_CUSTOM_PROMPT)
 
 
 def strip_dict(data: dict) -> dict:
-    """便利函数：使用默认清理器删除字典中的提示词"""
+    """Convenience function: strip prompts in dict using default sanitizer"""
     return _default_stripper.strip_dict(data.copy())
 
 
 def strip_json_string(json_str: str) -> str:
-    """便利函数：使用默认清理器删除 JSON 字符串中的提示词"""
+    """Convenience function: strip prompts in JSON string using default sanitizer"""
     return _default_stripper.strip_json_string(json_str)
 
 
 def strip_request_body(body: dict | str) -> dict | str:
-    """便利函数：使用默认清理器删除请求体中的提示词"""
+    """Convenience function: strip prompts in request body using default sanitizer"""
     return _default_stripper.strip_request_body(body)
 
 
 def strip_messages(messages: list) -> list:
-    """便利函数：使用默认清理器清理 OpenAI 格式的 messages"""
+    """Convenience function: strip prompts in OpenAI-formatted messages using default sanitizer"""
     return _default_stripper.strip_messages(messages)
 
 
 if __name__ == "__main__":
-    # 测试示例
+    # Test example
     test_data = {
         "promptType": "UserPrompt",
-        "promptText": "用户输入",
-        "systemPrompt": "你是一个 Excel 专家",
-        "systemPromptText": "要求你提供格式化的答案",
-        "promptCommand": "在单元格中添加数据",
-        "instructions": "按照以下步骤...",
+        "promptText": "User input",
+        "systemPrompt": "You are an Excel expert",
+        "systemPromptText": "You must provide formatted answers",
+        "promptCommand": "Add data to cell",
+        "instructions": "Follow these steps...",
         "messages": [
-            {"role": "system", "content": "系统提示词"},
-            {"role": "user", "content": "用户消息"},
-            {"role": "assistant", "content": "回复消息"},
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "User message"},
+            {"role": "assistant", "content": "Assistant reply"},
         ],
     }
 
-    print("=== 原始数据 ===")
+    print("=== Original Data ===")
     print(json.dumps(test_data, indent=2, ensure_ascii=False))
 
-    print("\n=== 清理后 ===")
+    print("\n=== Cleaned ===")
     cleaned = strip_dict(test_data)
     print(json.dumps(cleaned, indent=2, ensure_ascii=False))
 
-    print("\n=== 删除的字段 ===")
+    print("\n=== Removed Fields ===")
     for key in test_data:
         if key not in cleaned:
             print(f"  ✓ {key}")

@@ -1,11 +1,11 @@
-# ── 敏感文件 (含 Token / 个人信息) ──
+# ── Sensitive Files (Containing Tokens / Personal Info) ──
 .augloop_token
 config.yaml
 conversations.db
 conversations.db-shm
 conversations.db-wal
 
-# ── 日志文件 ──
+# ── Log Files ──
 *.log
 
 # ── Python ──
@@ -18,7 +18,7 @@ build/
 .eggs/
 *.egg
 
-# ── 虚拟环境 ──
+# ── Virtual Environments ──
 venv/
 .venv/
 env/
@@ -30,11 +30,11 @@ env/
 *.swo
 *~
 
-# ── 系统 ──
+# ── System ──
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ── 缓存 ──
+# ── Cache ──
 .pytest_cache/
 .mypy_cache/

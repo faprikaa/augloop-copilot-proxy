@@ -1,34 +1,32 @@
-#!/usr/bin/env python3
 """
-server.py - OpenAI 兼容的 AugLoop Copilot 反向代理服务器 (v2)
+server.py - OpenAI-Compatible AugLoop Copilot Reverse Proxy Server (v2)
 
-完整 API 端点:
-  POST /v1/chat/completions        — OpenAI 兼容 AI 对话 (含 tools/function calling)
-  GET  /v1/models                  — 模型列表
-  GET  /v1/tools                   — 列出可用 Tools
-  POST /v1/tools/:name/execute     — 直接执行 Tool
-  GET  /v1/conversations           — 列出对话
-  POST /v1/conversations           — 创建对话
-  GET  /v1/conversations/:id       — 获取对话详情
-  GET  /v1/conversations/:id/messages — 获取对话消息
-  DELETE /v1/conversations/:id     — 删除对话
-  GET  /v1/prompts                 — Copilot 建议提示词
-  GET  /status                     — 代理状态 & Token 有效性
-  GET  /token/status               — Token 管理器详细状态
-  POST /token/refresh              — 强制刷新 Token
-  POST /token/extract-har          — 从 HAR 提取 Token
-  POST /token/frida-hunt           — 启动 Frida Token 截获 (后台)
-  GET  /token/frida-status         — 查询 Frida 截获状态
-  POST /token/wam-acquire          — 启动 WAM Token 获取 (后台)
-  GET  /token/wam-status           — 查询 WAM 获取状态
-  POST /token/manual               — 手动设置 Token
-  POST /token/auto                 — 🔑 全自动获取 authToken (WebSocket, 无需抓包!)
-  POST /admin/extract-token        — 从 HAR 提取 Token (兼容旧版)
-  GET  /                           — Desktop UI (桌面端界面)
+Full API Endpoints:
+  POST /v1/chat/completions        — OpenAI-compatible AI chat (with tools/function calling)
+  GET  /v1/models                  — Model list
+  GET  /v1/tools                   — List available Tools
+  POST /v1/tools/:name/execute     — Execute Tool directly
+  GET  /v1/conversations           — List conversations
+  POST /v1/conversations           — Create conversation
+  GET  /v1/conversations/:id       — Get conversation details
+  GET  /v1/conversations/:id/messages — Get conversation messages
+  DELETE /v1/conversations/:id     — Delete conversation
+  GET  /v1/prompts                 — Copilot suggested prompts
+  GET  /status                     — Proxy status & Token validity
+  GET  /token/status               — Token Manager detailed status
+  POST /token/refresh              — Force refresh Token
+  POST /token/extract-har          — Extract Token from HAR
+  POST /token/frida-hunt           — Start Frida Token capture (background)
+  GET  /token/frida-status         — Query Frida capture status
+  POST /token/wam-acquire          — Start WAM Token acquisition (background)
+  GET  /token/wam-status           — Query WAM acquisition status
+  POST /token/manual               — Manually configure Token
+  POST /token/auto                 — 🔑 Fully automated dual-token acquisition (WebSocket/memory, no sniffing required!)
+  POST /admin/extract-token        — Extract Token from HAR (legacy compatibility)
+  GET  /                           — Desktop Web UI
 
-启动:
-    python server.py
-    uvicorn server:app --host 0.0.0.0 --port 8080 --reload
+Start:
+  uvicorn server:app --host 127.0.0.1 --port 8080 --reload
 """
 
 import asyncio
@@ -56,7 +54,7 @@ from conversation_store import ConversationStore
 from token_manager import TokenManager
 from desktop_ui import DESKTOP_UI_HTML
 
-# ── 日志 ────────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
@@ -65,7 +63,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("proxy")
 
-# ── 配置 ────────────────────────────────────────────────────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 DB_PATH = Path(__file__).parent / "conversations.db"
@@ -85,16 +83,16 @@ def save_config(cfg: dict):
 
 config = load_config()
 
-# ── 核心组件初始化 ────────────────────────────────────────────────────────────
+# ── Core Component Initialization ─────────────────────────────────────────────
 
 token_manager = TokenManager(config)
-# 同步 token 到 config
+# Sync token to config
 if token_manager.has_token:
     config.setdefault("augloop", {})["bearer_token"] = token_manager.token
 
 augloop = AugLoopClient(config)
 ws_client = AugLoopWSClient(config)
-# 读取自定义系统提示词（环境变量，与 prompt_proxy 共享）
+# Read custom system prompt (environment variable, shared with prompt_proxy)
 _custom_prompt = os.environ.get("CUSTOM_SYSTEM_PROMPT", "")
 _custom_file = os.environ.get("CUSTOM_SYSTEM_PROMPT_FILE", "")
 if _custom_file and os.path.exists(_custom_file):
@@ -111,12 +109,12 @@ conversation_store = ConversationStore(str(DB_PATH))
 
 app = FastAPI(
     title="AugLoop Copilot Proxy",
-    description="OpenAI 兼容的 Microsoft 365 Copilot (AugLoop) 反向代理 - 支持 Tools & 对话管理",
+    description="OpenAI-compatible Microsoft 365 Copilot (AugLoop) reverse proxy - supports Tools & conversation management",
     version="2.0.0",
 )
 
 
-# ── API Key 校验 ─────────────────────────────────────────────────────────────
+# ── API Key Validation ────────────────────────────────────────────────────────
 
 
 def check_api_key(request: Request):
@@ -130,7 +128,7 @@ def check_api_key(request: Request):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
-# ── Pydantic 模型 ────────────────────────────────────────────────────────────
+# ── Pydantic Models ───────────────────────────────────────────────────────────
 
 
 class ChatMessage(BaseModel):
@@ -147,7 +145,7 @@ class ToolSchema(BaseModel):
 
 
 class StreamOptions(BaseModel):
-    """OpenAI stream_options 参数"""
+    """OpenAI stream_options parameter"""
     include_usage: bool = False
 
 
@@ -161,7 +159,7 @@ class ChatCompletionRequest(BaseModel):
     tools: list[ToolSchema] | None = None
     tool_choice: str | dict | None = None
     conversation_id: str | None = None
-    max_tool_iterations: int = Field(default=5, description="最大工具调用迭代次数")
+    max_tool_iterations: int = Field(default=5, description="Maximum tool call iteration count")
     user: str | None = None
     top_p: float | None = None
     frequency_penalty: float | None = None
@@ -177,26 +175,26 @@ class ChatCompletionRequest(BaseModel):
     model_config = {"extra": "allow"}
 
 
-# ── Responses API 模型 ───────────────────────────────────────────────────────
+# ── Responses API Models ──────────────────────────────────────────────────────
 
 
 class ResponseInputItem(BaseModel):
-    """Responses API input item - 可以是消息或内容块"""
+    """Responses API input item - can be a message or content part"""
     type: str | None = None
     role: str | None = None
     content: str | list[dict] | None = None
     text: str | None = None
-    # 用于 function_call_output
+    # For function_call_output
     call_id: str | None = None
     output: str | None = None
-    # 通用额外字段
+    # Generic extra fields
     model_extra: dict = {}
 
     model_config = {"extra": "allow"}
 
 
 class ResponsesAPIRequest(BaseModel):
-    """OpenAI Responses API 请求模型
+    """OpenAI Responses API request model
 
     POST /v1/responses
     https://platform.openai.com/docs/api-reference/responses
@@ -213,9 +211,9 @@ class ResponsesAPIRequest(BaseModel):
     user: str | None = None
     top_p: float | None = None
     metadata: dict | None = None
-    # 扩展字段
+    # Extension fields
     conversation_id: str | None = None
-    max_tool_iterations: int = Field(default=5, description="最大工具调用迭代次数")
+    max_tool_iterations: int = Field(default=5, description="Maximum tool call iteration count")
 
     model_config = {"extra": "allow"}
 
@@ -252,19 +250,19 @@ class ManualTokenRequest(BaseModel):
     auth_token: str = ""
 
 
-# ── 工具调用编排器 ────────────────────────────────────────────────────────────
+# ── Tool Calling Orchestrator ─────────────────────────────────────────────────
 
 
 class ToolOrchestrator:
     """
-    工具调用编排器
+    Tool Calling Orchestrator
 
-    负责:
-    1. 将 OpenAI tools 参数转换为系统提示词
-    2. 调用 AugLoop 获取 AI 回复
-    3. 解析 AI 回复中的工具调用请求
-    4. 执行工具并将结果反馈给 AI
-    5. 重复直到 AI 不再需要工具调用或达到最大迭代次数
+    Responsible for:
+    1. Converting OpenAI tools parameters into system prompts
+    2. Invoking AugLoop to obtain AI replies
+    3. Parsing tool calling requests from AI replies
+    4. Executing tools and feeding results back to AI
+    5. Repeating until AI requires no further tool calls or max iterations reached
     """
 
     def __init__(
@@ -277,17 +275,17 @@ class ToolOrchestrator:
         self.client = augloop_client
         self.ws = ws_client
         self.registry = registry
-        self._ws_lock = asyncio.Lock()  # 防止并发 WebSocket 访问
-        # 文件工具配置: 代码级默认值 + config 覆盖 (config.yaml 可能被 TokenManager 回写覆写)
+        self._ws_lock = asyncio.Lock()  # Prevent concurrent WebSocket access
+        # File tools config: code defaults + config overrides (config.yaml may be overwritten by TokenManager)
         ft_cfg = file_tools_config or {}
         self.file_tools_config = {
             "enabled": True,
-            "root_dir": str(Path(__file__).resolve().parent.parent),  # packet-sniffer 根目录
+            "root_dir": str(Path(__file__).resolve().parent.parent),  # packet-sniffer root directory
             "max_iterations": 8,
             "auto_save_code": True,
             **ft_cfg,
         }
-        # 解析并缓存根目录 (绝对路径)
+        # Resolve and cache root directory (absolute path)
         self._file_tools_root = Path(self.file_tools_config.get("root_dir", ".")).resolve()
         logger.info(
             "[FileTools] enabled=%s root=%s max_iter=%d auto_save=%s",
@@ -310,40 +308,40 @@ class ToolOrchestrator:
         system_prompt: str = "",
     ) -> dict:
         """
-        带工具调用的完整对话流程
+        Complete dialogue flow with tool calling
 
         Args:
-            system_prompt: 外部系统提示词 (如 Codex 的 instructions), 前置到 query 覆盖 Excel 默认身份
+            system_prompt: External system prompt (such as Codex instructions), prepended to query to override Excel default identity
         """
         if temperature is not None:
             logger.info("[Orchestrator] temperature=%.2f (passed through, AugLoop may ignore)", temperature)
         if top_p is not None:
             logger.info("[Orchestrator] top_p=%.2f (passed through, AugLoop may ignore)", top_p)
         if system_prompt:
-            logger.info("[Orchestrator] system_prompt (len=%d) 将前置到 query 覆盖 Excel 默认身份", len(system_prompt))
+            logger.info("[Orchestrator] system_prompt (len=%d) prepended to query to override Excel default identity", len(system_prompt))
 
-        # 🔑 文件工具模式: 始终注入代理自带的真实文件工具 (read_file/write_file/list_directory/run_shell)
-        # 忽略 Codex 传入的 placeholder tools，使用 registry 中有真实 handler 的内置工具
+        # 🔑 File tools mode: Always inject proxy built-in file tools (read_file/write_file/list_directory/run_shell)
+        # Ignore placeholder tools passed from Codex, using registry tools with real handlers
         if self.file_tools_config.get("enabled", False):
             return await self._chat_with_file_tools(
                 message, history, use_stream, model, system_prompt
             )
 
         if not tools:
-            # 没有工具，直接调用
+            # No tools provided, invoke directly
             if use_stream:
                 return {"stream": True, "generator": self._stream_simple(message, history, model, system_prompt)}
-            # 非流式: WebSocket
+            # Non-streaming: WebSocket
             response_text = await self._chat_sync(message, history, model, system_prompt)
             if response_text is None:
-                return {"error": "AugLoop 聊天无响应。可能原因: 1) JWE Token 过期, 2) WebSocket session 未正确关联。请确保 JWE Token 有效。"}
+                return {"error": "No response from AugLoop chat. Possible causes: 1) JWE Token expired, 2) WebSocket session not properly linked. Please ensure JWE Token is valid."}
             return {
                 "response_text": response_text,
                 "tool_calls_made": [],
                 "iterations": 0,
             }
 
-        # 有工具：构建系统提示词
+        # Tools present: construct system prompt
         tool_defs = []
         for tool_schema in tools:
             func = tool_schema.get("function", tool_schema) if isinstance(tool_schema, dict) else tool_schema.function
@@ -356,10 +354,10 @@ class ToolOrchestrator:
             ))
 
         tool_system_prompt = ToolCallParser.build_system_prompt(tool_defs)
-        # 🔑 合并外部 system_prompt (Codex instructions) + 工具提示词
+        # 🔑 Merge external system_prompt (Codex instructions) + tool prompt
         combined_system_prompt = "\n\n".join(p for p in [system_prompt, tool_system_prompt] if p)
 
-        # 迭代调用 (WebSocket)
+        # Iterative invocation (WebSocket)
         all_tool_calls = []
         current_message = f"{combined_system_prompt}\n\nUser: {message}" if combined_system_prompt else message
         full_history = (history or []).copy()
@@ -367,24 +365,24 @@ class ToolOrchestrator:
         for iteration in range(max_iterations):
             logger.info("Tool iteration %d/%d", iteration + 1, max_iterations)
 
-            # WebSocket (传入 combined_system_prompt 覆盖 Excel 默认身份)
+            # WebSocket (pass combined_system_prompt to override Excel default identity)
             response_text = await self._chat_sync(current_message, full_history if iteration > 0 else history, model, combined_system_prompt)
 
             if response_text is None:
-                return {"error": "AugLoop 聊天无响应 (工具迭代)。请检查 Token 有效性。"}
+                return {"error": "No response from AugLoop chat (tool iteration). Please check Token validity."}
 
-            # 解析工具调用
+            # Parse tool calls
             display_text, tool_calls = ToolCallParser.parse(response_text)
 
             if not tool_calls:
-                # 没有工具调用，返回最终结果
+                # No tool call found, return final result
                 return {
                     "response_text": response_text,
                     "tool_calls_made": all_tool_calls,
                     "iterations": iteration + 1,
                 }
 
-            # 执行工具调用
+            # Execute tool calls
             for tc in tool_calls:
                 tool_name = tc["name"]
                 tool_args = tc["arguments"]
@@ -406,16 +404,16 @@ class ToolOrchestrator:
                     "is_error": result_obj.is_error,
                 })
 
-                # 构建工具结果消息，反馈给 AI
+                # Construct tool result message and feed back to AI
                 tool_result_text = ToolCallParser.format_tool_result(
                     tool_name, result_obj.content, call_id
                 )
                 full_history.append({"role": "user", "content": current_message})
                 current_message = f"Tool result for {tool_name}:\n{tool_result_text}\n\nPlease continue based on the tool result above."
 
-            # 继续下一轮迭代
+            # Continue to next iteration
 
-        # 达到最大迭代次数
+        # Maximum iteration limit reached
         return {
             "response_text": display_text or response_text,
             "tool_calls_made": all_tool_calls,
@@ -423,7 +421,7 @@ class ToolOrchestrator:
             "warning": "Reached max tool iterations",
         }
 
-    # ── 文件工具 Agent 循环 ──────────────────────────────────────────────────
+    # ── File Tools Agent Loop ──────────────────────────────────────────────────
 
     async def _chat_with_file_tools(
         self,
@@ -434,22 +432,22 @@ class ToolOrchestrator:
         system_prompt: str = "",
     ) -> dict:
         """
-        文件工具 Agent 循环:
-        1. 注入代理自带的真实文件工具系统提示词
-        2. 调用 AugLoop 获取回复
-        3. 解析 <tool_call> 标签
-        4. 通过 registry 执行 (真实 handler: read_file/write_file/list_directory/run_shell)
-        5. 将结果反馈给模型, 重复直到无需工具
-        6. 若模型未使用工具但有代码块, 自动保存 (fallback)
+        File Tools Agent Loop:
+        1. Inject built-in file tools system prompt
+        2. Invoke AugLoop to get model reply
+        3. Parse <tool_call> tags
+        4. Execute via registry (real handlers: read_file/write_file/list_directory/run_shell)
+        5. Feed results back to model; repeat until no further tools are needed
+        6. If model uses no tools but includes code blocks, auto-save as fallback
         """
         file_prompt = self._build_file_tools_prompt()
         combined = "\n\n".join(p for p in [system_prompt, file_prompt] if p)
 
         all_tool_calls: list[dict] = []
         saved_files: list[dict] = []
-        # 注意: combined (含 file_prompt) 仅通过 system_prompt 参数传递,
-        # 由 send_chat_stream -> _build_copilot_chat_message 前置一次.
-        # 不要放入 current_message, 否则会重复注入.
+        # Note: combined (including file_prompt) is passed only via system_prompt parameter,
+        # prepended once by send_chat_stream -> _build_copilot_chat_message.
+        # Do not place into current_message to prevent duplicate injection.
         current_message = message
         full_history = (history or []).copy()
         max_iter = self.file_tools_config.get("max_iterations", 8)
@@ -468,14 +466,14 @@ class ToolOrchestrator:
             )
 
             if response_text is None:
-                return {"error": "AugLoop 聊天无响应 (文件工具迭代)。请检查 Token 有效性。"}
+                return {"error": "No response from AugLoop chat (file tools iteration). Please check Token validity."}
 
             display_text, tool_calls = ToolCallParser.parse(response_text)
 
             if not tool_calls:
-                # 现实检查: 如果模型声称已操作但未使用 tool_call, 强制重试
+                # Reality check: If model claims action was performed without using tool_call, force retry
                 if self._detect_hallucinated_claims(response_text) and iteration < max_iter - 1:
-                    logger.warning("[FileTools] 检测到幻觉声明 (无 tool_call), 强制重试")
+                    logger.warning("[FileTools] Hallucinated action claim detected without tool_call, forcing retry")
                     current_message = (
                         "⚠️ REALITY CHECK: No tool_call tag was detected in your previous response. "
                         "Any file operations you claimed to have performed did NOT actually happen. "
@@ -486,11 +484,11 @@ class ToolOrchestrator:
                     full_history.append({"role": "user", "content": message})
                     continue
                 
-                # 无工具调用 — 尝试自动保存代码块 (fallback)
+                # No tool calls — attempt auto-saving code blocks (fallback)
                 if self.file_tools_config.get("auto_save_code", False):
                     saved_files = self._auto_save_code_blocks(response_text, message)
                     if saved_files:
-                        note = "\n\n---\n✅ 已自动保存以下文件:\n"
+                        note = "\n\n---\n✅ Automatically saved the following files:\n"
                         for f in saved_files:
                             note += f"- `{f['path']}` ({f['bytes']} bytes)\n"
                         response_text = response_text + note
@@ -502,7 +500,7 @@ class ToolOrchestrator:
                     "iterations": iteration + 1,
                 }
 
-            # 执行工具调用
+            # Execute tool calls
             for tc in tool_calls:
                 tool_name = tc["name"]
                 tool_args = self._resolve_tool_args(tc.get("arguments", {}), tool_name)
@@ -537,7 +535,7 @@ class ToolOrchestrator:
                     "If the task is complete, give a brief summary."
                 )
 
-        # 达到最大迭代次数
+        # Maximum iteration limit reached
         return {
             "response_text": display_text or response_text,
             "tool_calls_made": all_tool_calls,
@@ -547,17 +545,14 @@ class ToolOrchestrator:
         }
 
     def _detect_hallucinated_claims(self, text: str) -> bool:
-        """检测模型回复中是否包含幻觉的执行声明"""
+        """Detect if model reply contains hallucinated execution claims"""
         import re
         claim_patterns = [
-            r"(?:已|已经|成功|我.*已).*(?:创建|保存|写入|生成|执行|建立|生成到|落盘|写到)",
-            r"文件.*(?:已|已经|成功).*(?:创建|保存|写入)",
-            r"文件夹.*(?:已|已经|成功).*(?:创建|建立)",
-            r"目录.*(?:已|已经|成功).*(?:创建|建立)",
             r"(?:I (?:have|just)|already|successfully).*(?:created|saved|written|executed|generated)",
+            r"(?:file|folder|directory).*(?:has been|was|already) (?:created|saved|written)",
             r"(?:created|saved|written|executed|generated) (?:the|a) (?:file|folder|directory)",
             r"/home/jovyan/", r"/workspace/", r"/notebooks/",
-            r"我已经.*执行.*命令", r"I (?:ran|executed) (?:the )?command",
+            r"I (?:have )?(?:run|ran|executed) (?:the )?command", r"I (?:ran|executed) (?:the )?command",
         ]
         for pattern in claim_patterns:
             if re.search(pattern, text, re.IGNORECASE):
@@ -565,7 +560,7 @@ class ToolOrchestrator:
         return False
 
     def _extract_shell_commands(self, text: str) -> list:
-        """从模型回复中提取 shell 命令"""
+        """Extract shell commands from model reply"""
         import re
         commands, seen = [], set()
         shell_pattern = re.compile(r'```(?:bash|shell|sh|powershell|cmd)\n(.*?)```', re.DOTALL)
@@ -590,9 +585,9 @@ class ToolOrchestrator:
         return commands
 
     def _build_file_tools_prompt(self) -> str:
-        """构建文件工具的系统提示词 (注入到 query 前置, 对抗 Excel 默认身份)"""
+        """Construct file tools system prompt (prepended to query to override Excel default identity)"""
         root = str(self._file_tools_root)
-        # 用 concat 构建 <tool_call> 标签, 与 tool_call_parser.py 风格一致
+        # Construct <tool_call> tags via concat matching tool_call_parser.py style
         tc_open = chr(60) + "tool_call"
         tc_close = chr(60) + "/tool_call" + chr(62)
         gt = chr(62)
@@ -632,7 +627,7 @@ class ToolOrchestrator:
         )
 
     def _resolve_tool_args(self, args, tool_name: str) -> dict:
-        """沙箱化工具参数中的文件路径, 防止路径穿越"""
+        """Sandbox file paths in tool arguments to prevent directory traversal"""
         if not isinstance(args, dict):
             return {}
         args = dict(args)
@@ -647,7 +642,7 @@ class ToolOrchestrator:
             try:
                 candidate.relative_to(root)
             except ValueError:
-                # 路径越界: 回退到根目录下同名文件
+                # Path out of bounds: fallback to same filename in root directory
                 logger.warning("[FileTools] Path '%s' outside root, clamped to %s", raw, root / raw_p.name)
                 candidate = (root / raw_p.name).resolve()
             return str(candidate)
@@ -664,13 +659,13 @@ class ToolOrchestrator:
 
     def _auto_save_code_blocks(self, text: str, user_message: str = "") -> list[dict]:
         """
-        智能提取代码块并保存到磁盘:
-        1. 总是保存带 file= 提示的代码块 (高优先级)
-        2. 若 user_message 含 "保存/创建/写入" 意图, 提取所有代码块并推断文件名
-           (因为 AugLoop 模型倾向于在文本中假装保存而不发出 <tool_call> 标签)
+        Intelligently extract code blocks and save to disk:
+        1. Always save code blocks with file= hint (high priority)
+        2. If user_message implies save/create/write intent, extract code blocks and infer filenames
+           (AugLoop models may claim files are saved in plain text without emitting <tool_call> tags)
 
-        文件名推断优先级:
-        a. file= 提示 > b. 代码块前文本中的文件名 > c. 用户消息中的文件名 > d. 语言默认名
+        Filename inference priority:
+        a. file= hint > b. filename in preceding text > c. filename in user message > d. language default
         """
         import re
         saved: list[dict] = []
@@ -703,10 +698,10 @@ class ToolOrchestrator:
                 logger.error("[FileTools][AutoSave] Failed %s: %s", candidate, e)
                 return None
 
-        # 文件名/路径正则: 可含目录 (dir/sub/file.ext) 或纯文件名 (file.ext)
+        # Filename/path regex: can contain directory (dir/sub/file.ext) or bare filename (file.ext)
         path_re = re.compile(r"(?:[\w\-]+/)*[\w\-]+\.\w{1,5}(?![\w.])")
 
-        # 已知库名黑名单: 这些不是用户要保存的文件, 而是模型回复中引用的 API/库
+        # Blacklist of known libraries/APIs: referenced in model reply, not user files to save
         LIB_BLOCKLIST = {
             "office.js", "excel.js", "word.js", "powerpoint.js", "outlook.js",
             "office.d.ts", "excel.d.ts", "word.d.ts",
@@ -717,27 +712,27 @@ class ToolOrchestrator:
         }
 
         def _filter_paths(paths: list[str]) -> list[str]:
-            """过滤掉黑名单中的库名"""
+            """Filter out blacklisted library names"""
             return [p for p in paths if p.split("/")[-1].lower() not in LIB_BLOCKLIST]
 
-        # 从用户消息中提取目标目录 (如 "在 test_file_tools_output 目录下")
+        # Extract target directory from user message (e.g. "in test_file_tools_output directory")
         target_dir = ""
-        dir_m = re.search(r"在\s+([\w\-/\\]+)\s*目录", user_message)
+        dir_m = re.search(r"(?:in|under|into)\s+(?:the\s+)?([\w\-/\\]+)(?:/|\s+dir|\s+directory)", user_message, re.IGNORECASE)
         if dir_m:
             target_dir = dir_m.group(1).replace("\\", "/").strip("/")
         if not target_dir:
-            # 备选: 路径中的目录部分
+            # Alternative: directory part of the path
             pm = path_re.search(user_message)
             if pm and "/" in pm.group(0):
                 target_dir = str(Path(pm.group(0)).parent).replace("\\", "/")
 
         def _join_dir(filename: str) -> str:
-            """将文件名与目标目录拼接"""
+            """Join filename with target directory"""
             if target_dir and "/" not in filename and "\\" not in filename:
                 return f"{target_dir}/{filename}"
             return filename
 
-        # 语言 -> 默认文件名
+        # Language -> default filename
         lang_defaults = {
             "python": "script.py", "py": "script.py",
             "javascript": "script.js", "js": "script.js",
@@ -752,10 +747,10 @@ class ToolOrchestrator:
             "xml": "data.xml", "c": "main.c", "cpp": "main.cpp",
         }
 
-        # 已保存的文件名集合 (用于去重, 避免同一文件被多个代码块覆盖)
+        # Set of saved filenames (for deduplication, prevents same file being overwritten by multiple blocks)
         saved_names: set[str] = set()
 
-        # 1. 先保存带 file= 提示的代码块
+        # 1. First save code blocks with file= hint
         hint_pattern = re.compile(r"```[^\n]*?\bfile=(\S+)[^\n]*\n(.*?)```", re.DOTALL)
         hint_spans = []
         for m in hint_pattern.finditer(text):
@@ -769,10 +764,10 @@ class ToolOrchestrator:
                 saved_names.add(fname_key)
                 saved.append(r)
 
-        # 2. 检测保存意图 (用户消息 或 回复文本中均可)
+        # 2. Detect save intention (in user message or model response)
         save_keywords = [
-            "保存", "创建", "写入", "生成", "写一个", "写个", "写份", "编写", "开发",
-            "新建", "建立", "输出到文件", "存为", "存成", "落盘", "实现",
+            "save", "create", "write", "generate", "build", "implement", "output to", "make a",
+            "add", "export", "store",
             "save", "create", "write", "generate", "make a file", "export",
         ]
         has_save_intent = (
@@ -782,14 +777,14 @@ class ToolOrchestrator:
         if not has_save_intent:
             return saved
 
-        # 3. 提取所有代码块 (跳过已有 file= 提示的)
+        # 3. Extract all code blocks (skip blocks with existing file= hints)
         all_pattern = re.compile(r"```(\w*)[^\n]*\n(.*?)```", re.DOTALL)
         user_paths = _filter_paths(path_re.findall(user_message))
-        # 用户消息中的纯文件名 (优先级最高, 避免 Office.js 误报)
+        # Pure filename from user message (highest priority, avoids Office.js false positive)
         user_filenames = [p.split("/")[-1] for p in user_paths]
 
         for m in all_pattern.finditer(text):
-            # 跳过已处理的 file= 提示块
+            # Skip already processed file= hint blocks
             if any(s <= m.start() < e for s, e in hint_spans):
                 continue
 
@@ -798,28 +793,28 @@ class ToolOrchestrator:
             if len(content.strip()) < 20:
                 continue
 
-            # 推断文件名 (优先级: 用户消息 > 代码块前文本 > 语言默认)
+            # Infer filename (priority: user message > text before block > language default)
             filename = None
-            # c. 用户消息中的文件名 (最可靠, 避免误报)
+            # c. Filename in user message (most reliable, avoids false positives)
             if user_filenames:
                 filename = user_filenames[0]
-            # b. 代码块前 100 字中的路径/文件名 (备选, 过滤黑名单)
+            # b. Path/filename in 100 chars before code block (fallback, filtered by blacklist)
             if not filename:
                 before = text[:m.start()][-100:]
                 before_paths = _filter_paths(path_re.findall(before))
                 if before_paths:
                     filename = before_paths[-1]
-            # d. 语言默认
+            # d. Language default
             if not filename and lang in lang_defaults:
                 filename = lang_defaults[lang]
 
             if not filename:
                 continue
 
-            # 拼接目标目录
+            # Join target directory
             filename = _join_dir(filename)
 
-            # 去重: 同一文件名只保存一次 (保留第一个, 通常是最完整的代码块)
+            # Deduplication: save each filename only once (keep first, usually most complete code block)
             fname_key = filename.replace("\\", "/").lower()
             if fname_key in saved_names:
                 continue
@@ -832,54 +827,54 @@ class ToolOrchestrator:
         return saved
 
     async def _chat_sync(self, message: str, history: list[dict] | None = None, model: str = "", system_prompt: str = "") -> str | None:
-        """统一的聊天方法 — 纯 WebSocket 模式 (带超时重试)
+        """Unified chat method — pure WebSocket mode (with timeout and retry)
 
-        从 MITM 抓包确认: Excel Copilot 聊天完全通过 WebSocket:
-        1. 客户端发送 SyncMessage → SignalOperation → ExcelAgentExperimentalSignal
-        2. 服务器返回 AnnotationResultsMessage → ExcelAgentExperimentalOutputAnnotation
-        3. 响应文本在 body.streamedChunk.text / body.chunkContent
+        Verified from MITM capture: Excel Copilot chat operates entirely over WebSocket:
+        1. Client sends SyncMessage -> SignalOperation -> ExcelAgentExperimentalSignal
+        2. Server returns AnnotationResultsMessage -> ExcelAgentExperimentalOutputAnnotation
+        3. Response text in body.streamedChunk.text / body.chunkContent
         """
         async with self._ws_lock:
-            # 第一次尝试
+            # First attempt
             result = await self._chat_sync_inner(message, history, model, system_prompt)
             if result is not None:
                 return result
-            # 超时/失败: 强制重连后重试一次
-            logger.warning("[WS] 第一次聊天失败 (超时/无响应), 强制重连并重试...")
+            # Timeout/failure: force reconnect and retry once
+            logger.warning("[WS] First chat attempt failed (timeout/no response), forcing reconnect and retrying...")
             self.ws._connected = False
             await self.ws._cleanup_ws()
             ok = await self.ws._connect_and_init()
             if not ok:
-                logger.error("[WS] 重连失败")
+                logger.error("[WS] Reconnect failed")
                 return None
-            logger.info("[WS] 重连成功, 重试聊天...")
+            logger.info("[WS] Reconnected successfully, retrying chat...")
             return await self._chat_sync_inner(message, history, model, system_prompt)
 
     async def _chat_sync_inner(self, message: str, history: list[dict] | None = None, model: str = "", system_prompt: str = "") -> str | None:
-        """内部的聊天实现 (调用者已持有锁)"""
-        # 确保 WebSocket 已连接 (检测断开并重连)
+        """Internal chat implementation (caller already holds lock)"""
+        # Ensure WebSocket is connected (detect disconnect and reconnect)
         if not self.ws.is_ws_alive:
             if self.ws._connected:
-                logger.info("[WS] 检测到连接已断开，正在重新连接...")
+                logger.info("[WS] Connection disconnect detected, reconnecting...")
                 self.ws._connected = False
                 await self.ws._cleanup_ws()
             ok = await self.ws._connect_and_init()
             if not ok:
-                logger.error("[WS] WebSocket 连接失败")
+                logger.error("[WS] WebSocket connection failed")
                 return None
 
-        # 直接通过 WebSocket 发送和接收
+        # Send and receive directly via WebSocket
         return await self._ws_chat_sync(message, history, model, system_prompt)
 
     async def _http_chat_only(self, message: str) -> str | None:
-        """仅通过 HTTP API 发送聊天 (无 WebSocket) — 备用方案
+        """Send chat via HTTP API only (no WebSocket) — fallback scheme
 
-        注意: 真实 Excel 不通过 HTTP 发送聊天信号，此方法仅作为备用。
+        Note: Real Excel does not send chat signals via HTTP; this method is a fallback only.
         """
         return None
 
     async def _ws_chat_sync(self, message: str, history: list[dict] | None = None, model: str = "", system_prompt: str = "") -> str | None:
-        """通过 WebSocket 获取完整 (非流式) 聊天响应"""
+        """Get complete (non-streaming) chat response via WebSocket"""
         full_text = ""
         async for chunk in self.ws.send_chat_stream(message, history, model, system_prompt):
             if chunk.get("type") == "text":
@@ -892,7 +887,7 @@ class ToolOrchestrator:
         return full_text if full_text else None
 
     async def _stream_simple(self, message: str, history: list[dict] | None = None, model: str = "", system_prompt: str = ""):
-        """简单流式 (无工具)"""
+        """Simple streaming (no tools)"""
         async for chunk in self.ws.send_chat_stream(message, history, model, system_prompt):
             if chunk.get("type") == "text":
                 yield chunk["text"]
@@ -906,11 +901,11 @@ class ToolOrchestrator:
 orchestrator = ToolOrchestrator(augloop, ws_client, tool_registry, config.get("file_tools", {}))
 
 
-# ── Token 任务管理器 (Frida/WAM 后台任务) ────────────────────────────────────
+# ── Token Task Manager (Frida/WAM Background Tasks) ───────────────────────────
 
 
 class _LogCapture(logging.Handler):
-    """捕获日志用于 UI 显示"""
+    """Capture logs for UI display"""
     def __init__(self):
         super().__init__()
         self.logs: list[str] = []
@@ -922,7 +917,7 @@ class _LogCapture(logging.Handler):
 
 
 class TokenTaskManager:
-    """管理后台 Token 获取任务 (Frida, WAM)"""
+    """Manage background Token acquisition tasks (Frida, WAM)"""
 
     def __init__(self, token_mgr: TokenManager, ws: AugLoopWSClient, cfg: dict):
         self.token_manager = token_mgr
@@ -1077,17 +1072,17 @@ class TokenTaskManager:
 token_task_mgr = TokenTaskManager(token_manager, ws_client, config)
 
 
-# ── 路由: 模型 ───────────────────────────────────────────────────────────────
+# ── Route: Models ─────────────────────────────────────────────────────────────
 
 
-# 支持的模型列表 (owned_by 对应上游提供商)
+# Supported model list (owned_by maps to upstream provider)
 SUPPORTED_MODELS = [
     {"id": "gpt-5.5", "owned_by": "openai"},
     {"id": "gpt-5.6", "owned_by": "openai"},
     {"id": "claude-opus-4.8", "owned_by": "anthropic"},
     {"id": "claude-opus-5", "owned_by": "anthropic"},
     {"id": "claude-sonnet-5", "owned_by": "anthropic"},
-    # 兼容别名
+    # Compatibility aliases
     {"id": "copilot", "owned_by": "microsoft"},
     {"id": "copilot-excel", "owned_by": "microsoft"},
     {"id": "copilot-word", "owned_by": "microsoft"},
@@ -1096,7 +1091,7 @@ SUPPORTED_MODELS = [
 
 @app.get("/v1/models")
 async def list_models(request: Request):
-    """OpenAI 兼容: 模型列表"""
+    """OpenAI compatible: model list"""
     check_api_key(request)
     return {
         "object": "list",
@@ -1107,16 +1102,16 @@ async def list_models(request: Request):
     }
 
 
-# ── 路由: 对话 ───────────────────────────────────────────────────────────────
+# ── Route: Conversations ──────────────────────────────────────────────────────
 
 
-# ── OpenAI 兼容辅助函数 ───────────────────────────────────────────────────────
+# ── OpenAI Compatibility Helpers ──────────────────────────────────────────────
 
 
 def _apply_stop_sequences(text: str, stop: str | list[str] | None) -> tuple[str, bool]:
-    """应用 stop 序列截断
+    """Apply stop sequence truncation
 
-    返回 (截断后的文本, 是否被截断)
+    Returns (truncated_text, is_truncated)
     """
     if not stop:
         return text, False
@@ -1130,7 +1125,7 @@ def _apply_stop_sequences(text: str, stop: str | list[str] | None) -> tuple[str,
 
 
 def _truncate_tokens(text: str, max_tokens: int | None) -> str:
-    """粗略截断文本到指定 token 数 (按 4 字符 = 1 token 估算)"""
+    """Roughly truncate text to specified token count (estimated at 4 chars = 1 token)"""
     if not max_tokens or max_tokens <= 0:
         return text
     max_chars = max_tokens * 4
@@ -1140,7 +1135,7 @@ def _truncate_tokens(text: str, max_tokens: int | None) -> str:
 
 
 def _estimate_tokens(text: str) -> int:
-    """粗略估算 token 数 (4 字符 = 1 token)"""
+    """Roughly estimate token count (4 chars = 1 token)"""
     return max(1, len(text) // 4)
 
 
@@ -1154,7 +1149,7 @@ def _build_chat_completion_response(
     tool_results: list[dict] | None = None,
     include_logprobs: bool = False,
 ) -> dict:
-    """构建完整的 OpenAI Chat Completion 响应对象"""
+    """Build complete OpenAI Chat Completion response object"""
     resp = {
         "id": completion_id,
         "object": "chat.completion",
@@ -1180,21 +1175,21 @@ def _build_chat_completion_response(
 @app.post("/v1/chat/completions")
 async def chat_completions(req: ChatCompletionRequest, request: Request):
     """
-    OpenAI 兼容: AI 对话接口 (含 tools/function calling)
+    OpenAI Compatible: AI chat completion endpoint (with tools/function calling)
 
-    完全兼容 OpenAI Chat Completions API 协议。
-    支持参数: model, messages, stream, temperature, max_tokens, max_completion_tokens,
-              tools, tool_choice, n, stop, top_p, frequency_penalty, presence_penalty,
-              stream_options, logprobs, top_logprobs, seed, response_format, user
+    Fully compatible with OpenAI Chat Completions API protocol.
+    Supports parameters: model, messages, stream, temperature, max_tokens, max_completion_tokens,
+                         tools, tool_choice, n, stop, top_p, frequency_penalty, presence_penalty,
+                         stream_options, logprobs, top_logprobs, seed, response_format, user
 
-    支持两种模式:
-    1. 无 tools: 直接转发到 AugLoop
-    2. 有 tools: 服务器端工具调用编排 (透明模式)
+    Supported modes:
+    1. No tools: Forward directly to AugLoop
+    2. With tools: Server-side tool calling orchestration (transparent mode)
     """
     check_api_key(request)
 
     try:
-        # 提取消息: 最后一条 user 消息作为当前输入，其余作为历史
+        # Extract messages: last user message as current input, rest as conversation history
         user_message = ""
         system_prompt = ""
         history: list[dict] = []
@@ -1210,7 +1205,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             elif msg.role == "system":
                 system_prompt = msg.content or ""
             elif msg.role == "tool":
-                # tool 角色消息: 工具返回结果
+                # tool role message: tool execution result
                 history.append({
                     "role": "tool",
                     "content": msg.content or "",
@@ -1218,16 +1213,16 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 })
 
         if not user_message:
-            raise HTTPException(status_code=400, detail="messages 中没有 user 消息")
+            raise HTTPException(status_code=400, detail="No user message found in messages")
 
-        # 记录请求参数 (用于调试)
+        # Log request parameters (for debugging)
         logger.info("Chat request: %s (tools=%s, stream=%s, n=%s, stop=%s, max_tokens=%s, temp=%s)",
                     user_message[:50], bool(req.tools), req.stream,
                     req.n, req.stop is not None,
                     req.max_tokens or req.max_completion_tokens,
                     req.temperature)
 
-        # 对话管理: 保存用户消息
+        # Conversation management: save user message
         conv_id = req.conversation_id
         if conv_id:
             conv = conversation_store.get_conversation(conv_id)
@@ -1238,21 +1233,21 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
 
         conversation_store.add_message(conv_id, "user", user_message)
 
-        # 工具调用编排
+        # Tool calling orchestration
         tools_list = None
         if req.tools:
             tools_list = [t.model_dump() if hasattr(t, 'model_dump') else t.dict() for t in req.tools]
 
-        # 计算有效的 max_tokens
+        # Compute effective max_tokens
         effective_max_tokens = req.max_completion_tokens or req.max_tokens
 
-        # 流式模式 (仅支持 n=1)
+        # Streaming mode (supports n=1 only)
         if req.stream:
             if req.n and req.n > 1:
-                logger.warning("stream 模式不支持 n>1, 忽略 n 参数")
+                logger.warning("stream mode does not support n>1, ignoring n parameter")
 
-            # 🔑 直接使用 WebSocket orchestrator (流式)
-            # WS 路径会自动从内存扫描最新 JWE token, 无需预先 get_prompts 验证
+            # 🔑 Direct WebSocket orchestrator (streaming)
+            # WS path scans latest JWE token automatically from memory; no pre-validation needed
             result = await orchestrator.chat_with_tools(
                 message=user_message,
                 history=history if history else None,
@@ -1285,7 +1280,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                     media_type="text/event-stream",
                 )
 
-            # 如果 orchestrator 返回了非流式结果 (有工具调用)
+            # If orchestrator returned non-streaming result (tool calls present)
             response_text = result.get("response_text", "")
             tool_calls_made = result.get("tool_calls_made", [])
             response_text, _ = _apply_stop_sequences(response_text, req.stop)
@@ -1293,7 +1288,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
             conversation_store.add_message(conv_id, "assistant", response_text)
             completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
-            # 🔑 关键修复: 流式请求收到非流式结果时, 包装为 SSE 输出, 避免客户端收到 JSON 无法显示
+            # 🔑 Critical fix: When streaming request receives non-streaming result, wrap as SSE output to avoid client display failures
             if response_text:
                 async def _wrap_chat_stream(text: str):
                     yield text
@@ -1320,11 +1315,11 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 include_logprobs=bool(req.logprobs),
             )
 
-        # ── 非流式模式 ──
-        # 🔑 直接使用 WebSocket orchestrator (ExcelAgentExperimentalSignal)
-        # 从 MITM 抓包确认: Excel Copilot 聊天完全通过 WebSocket, 不走 HTTP。
-        # HTTP POST 的 CopilotChatSignal 是不同的信号类型, 不触发 RunScriptAnnotation 流程, 总是 400/401 失败。
-        # WS 路径会自动从内存扫描最新 JWE token 并做 licensing check, 无需预先 get_prompts 验证。
+        # ── Non-Streaming Mode ──
+        # 🔑 Direct WebSocket orchestrator (ExcelAgentExperimentalSignal)
+        # Verified from MITM capture: Excel Copilot chat operates entirely over WebSocket, not HTTP.
+        # HTTP POST CopilotChatSignal is a different signal type that does not trigger RunScriptAnnotation and fails with 400/401.
+        # WS path automatically scans latest JWE token from memory and performs licensing checks without pre-validation.
         result = await orchestrator.chat_with_tools(
             message=user_message,
             history=history if history else None,
@@ -1344,16 +1339,16 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         response_text = result.get("response_text", "")
         tool_calls_made = result.get("tool_calls_made", [])
 
-        # 应用 stop 序列和 max_tokens 截断
+        # Apply stop sequence and max_tokens truncation
         response_text, _ = _apply_stop_sequences(response_text, req.stop)
         response_text = _truncate_tokens(response_text, effective_max_tokens)
 
-        # 保存 AI 回复
+        # Save AI reply
         conversation_store.add_message(conv_id, "assistant", response_text)
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
-        # 如果有工具调用，在响应中包含 tool_calls
+        # If tool calls present, include tool_calls in response
         if tool_calls_made:
             openai_tool_calls = []
             for tc in tool_calls_made:
@@ -1383,7 +1378,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
                 include_logprobs=bool(req.logprobs),
             )
 
-        # 普通响应 (支持 n > 1)
+        # Standard response (supports n > 1)
         choices = []
         n = max(1, req.n or 1)
         for idx in range(n):
@@ -1406,12 +1401,12 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("chat_completions 内部错误: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+        logger.error("chat_completions internal error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
 async def _single_text_generator(text: str):
-    """将单段文本包装为异步生成器 (用于流式返回 HTTP 结果)"""
+    """Wrap single text snippet as async generator (for streaming HTTP results)"""
     yield text
 
 
@@ -1425,12 +1420,12 @@ async def _stream_openai(
     include_usage: bool = False,
     prompt_text: str = "",
 ):
-    """OpenAI SSE 流式响应
+    """OpenAI SSE Streaming Response
 
-    支持:
-    - stop 序列截断
-    - max_tokens 截断
-    - stream_options.include_usage (在最后发送 usage chunk)
+    Supports:
+    - stop sequence truncation
+    - max_tokens truncation
+    - stream_options.include_usage (sends usage chunk at the end)
     """
     full_text = ""
     truncated = False
@@ -1439,13 +1434,13 @@ async def _stream_openai(
 
     try:
         async for text in generator:
-            # 检查 stop 序列 (可能在增量文本中)
+            # Check stop sequence (may appear in incremental text)
             if stop_sequences:
                 combined = full_text + text
                 for s in stop_sequences:
                     if s and s in combined:
                         idx = combined.index(s)
-                        # 只发送 stop 之前的部分
+                        # Send only portion before stop sequence
                         remaining = combined[len(full_text):idx]
                         if remaining:
                             full_text += remaining
@@ -1467,7 +1462,7 @@ async def _stream_openai(
                 if truncated:
                     break
 
-            # 检查 max_tokens 截断
+            # Check max_tokens truncation
             if effective_max_chars and len(full_text) + len(text) > effective_max_chars:
                 remaining_chars = effective_max_chars - len(full_text)
                 if remaining_chars > 0:
@@ -1519,11 +1514,11 @@ async def _stream_openai(
         }
         yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
-    # 保存到对话
+    # Save to conversation
     if full_text:
         conversation_store.add_message(conv_id, "assistant", full_text)
 
-    # 结束标记
+    # End marker
     finish_reason = "length" if truncated else "stop"
     end_data = {
         "id": completion_id,
@@ -1535,7 +1530,7 @@ async def _stream_openai(
     }
     yield f"data: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
-    # 如果请求了 include_usage，在最后发送 usage chunk
+    # If include_usage requested, send usage chunk at the end
     if include_usage:
         usage_data = {
             "id": completion_id,
@@ -1555,15 +1550,15 @@ async def _stream_openai(
     yield "data: [DONE]\n\n"
 
 
-# ── 路由: Responses API ──────────────────────────────────────────────────────
+# ── Route: Responses API ──────────────────────────────────────────────────────
 
 
 def _parse_responses_input(req: ResponsesAPIRequest) -> tuple[str, str, list[dict]]:
-    """将 Responses API 的 input 字段解析为 (user_message, system_prompt, history)
+    """Parse Responses API input field into (user_message, system_prompt, history)
 
-    input 可以是:
-    - str: 简单文本
-    - list[dict]: 消息数组 [{role, content}, ...]
+    input can be:
+    - str: simple text string
+    - list[dict]: message array [{role, content}, ...]
     """
     system_prompt = req.instructions or ""
     history: list[dict] = []
@@ -1576,10 +1571,10 @@ def _parse_responses_input(req: ResponsesAPIRequest) -> tuple[str, str, list[dic
         for item in req.input:
             if isinstance(item, dict):
                 role = item.get("role", "user")
-                # content 可以是 string 或 list of content parts
+                # content can be string or list of content parts
                 content = item.get("content", "")
                 if isinstance(content, list):
-                    # 拼接 content parts 中的 text
+                    # Join text from content parts
                     parts = []
                     for part in content:
                         if isinstance(part, dict):
@@ -1590,10 +1585,10 @@ def _parse_responses_input(req: ResponsesAPIRequest) -> tuple[str, str, list[dic
                 elif not isinstance(content, str):
                     content = str(content) if content else ""
 
-                # 处理 function_call_output 类型
+                # Handle function_call_output type
                 item_type = item.get("type", "")
                 if item_type == "function_call_output":
-                    # 工具结果反馈
+                    # Tool result feedback
                     msgs.append({
                         "role": "tool",
                         "content": item.get("output", ""),
@@ -1627,7 +1622,7 @@ def _parse_responses_input(req: ResponsesAPIRequest) -> tuple[str, str, list[dic
                 else:
                     msgs.append({"role": role, "content": content})
 
-        # 最后一条 user 消息作为当前消息，其余作为 history
+        # Last user message as current message, rest as history
         if msgs:
             for m in msgs[:-1]:
                 history.append(m)
@@ -1647,10 +1642,10 @@ def _build_responses_object(
     tool_calls: list[dict] | None = None,
     status: str = "completed",
 ) -> dict:
-    """构建 OpenAI Responses API 非流式响应对象"""
+    """Build OpenAI Responses API non-streaming response object"""
     output: list[dict] = []
 
-    # 如果有 tool_calls，添加 function_call 输出项
+    # If tool_calls present, add function_call output item
     if tool_calls:
         for tc in tool_calls:
             output.append({
@@ -1662,7 +1657,7 @@ def _build_responses_object(
                 "status": "completed",
             })
 
-    # 添加 message 输出项
+    # Add message output item
     message_item = {
         "type": "message",
         "id": f"msg_{uuid.uuid4().hex[:24]}",
@@ -1710,9 +1705,9 @@ async def _stream_responses_sse(
     conv_id: str,
     instructions: str = "",
 ) -> AsyncGenerator[str, None]:
-    """OpenAI Responses API SSE 流式响应
+    """OpenAI Responses API SSE streaming response
 
-    事件序列:
+    Event sequence:
     1. response.created
     2. response.output_item.added (message item)
     3. response.content_part.added (output_text part)
@@ -1725,7 +1720,7 @@ async def _stream_responses_sse(
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
     created_at = int(time.time())
     full_text = ""
-    seq = 0  # 🔑 OpenAI Responses API SSE 事件序号 (Codex 等客户端依赖此字段排序)
+    seq = 0  # 🔑 OpenAI Responses API SSE sequence number (relied on by Codex clients)
 
     # 1. response.created
     created_event = {
@@ -1781,7 +1776,7 @@ async def _stream_responses_sse(
     yield f"data: {json.dumps(part_added_event, ensure_ascii=False)}\n\n"
     seq += 1
 
-    # 4. response.output_text.delta (流式文本)
+    # 4. response.output_text.delta (streaming text)
     try:
         async for text in generator:
             full_text += text
@@ -1853,7 +1848,7 @@ async def _stream_responses_sse(
     yield f"data: {json.dumps(item_done_event, ensure_ascii=False)}\n\n"
     seq += 1
 
-    # 保存到对话
+    # Save to conversation
     if full_text:
         conversation_store.add_message(conv_id, "assistant", full_text)
 
@@ -1902,7 +1897,7 @@ async def _stream_responses_sse(
     }
     yield f"data: {json.dumps(completed_event, ensure_ascii=False)}\n\n"
 
-    # 最终标记
+    # Final marker
     yield "data: [DONE]\n\n"
 
 
@@ -1910,10 +1905,10 @@ async def _stream_responses_sse(
 async def create_response(req: ResponsesAPIRequest, request: Request):
     """OpenAI Responses API: POST /v1/responses
 
-    完全兼容 OpenAI Responses API 协议。
-    支持非流式和流式 (SSE) 两种模式。
+    Fully compatible with OpenAI Responses API protocol.
+    Supports both non-streaming and streaming (SSE) modes.
 
-    请求格式:
+    Request format:
         {
             "model": "copilot",
             "input": "Hello" | [{"role": "user", "content": "Hello"}],
@@ -1922,7 +1917,7 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
             "tools": [...]
         }
 
-    响应格式 (非流式):
+    Response format (non-streaming):
         {
             "id": "resp_...",
             "object": "response",
@@ -1931,7 +1926,7 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
             "usage": {...}
         }
 
-    流式格式 (SSE):
+    Streaming format (SSE):
         data: {"type": "response.created", ...}
         data: {"type": "response.output_text.delta", "delta": "...", ...}
         data: {"type": "response.completed", ...}
@@ -1940,24 +1935,24 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
     check_api_key(request)
 
     try:
-        # 🔍 调试: 记录完整请求体 (用于排查 Codex 等客户端兼容性)
+        # 🔍 Debug: log complete request body (for Codex client compatibility)
         try:
             raw_body = await request.body()
             body_preview = raw_body.decode("utf-8", errors="replace")[:2000]
-            logger.info("[Responses] 请求体预览: %s", body_preview)
+            logger.info("[Responses] Request body preview: %s", body_preview)
         except Exception:
             pass
 
-        # 解析 input
+        # Parse input
         user_message, system_prompt, history = _parse_responses_input(req)
 
         if not user_message:
-            raise HTTPException(status_code=400, detail="input 中没有 user 消息")
+            raise HTTPException(status_code=400, detail="No user message found in input")
 
         logger.info("Responses API: input=%s (stream=%s, tools=%s)",
                     user_message[:50], req.stream, bool(req.tools))
 
-        # 对话管理
+        # Conversation management
         conv_id = req.conversation_id
         if conv_id:
             conv = conversation_store.get_conversation(conv_id)
@@ -1970,11 +1965,11 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
 
         response_id = f"resp_{uuid.uuid4().hex[:24]}"
 
-        # 工具调用编排
+        # Tool calling orchestration
         tools_list = req.tools if req.tools else None
 
-        # 🔑 直接使用 orchestrator (WS 模式)
-        # HTTP send_chat 对 Excel Copilot 总是失败, 跳过直接走 WebSocket
+        # 🔑 Direct orchestrator (WS mode)
+        # HTTP send_chat always fails for Excel Copilot, skip and route directly via WebSocket
         result = await orchestrator.chat_with_tools(
             message=user_message,
             history=history if history else None,
@@ -1991,7 +1986,7 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
             conversation_store.add_message(conv_id, "assistant", f"[Error] {result['error']}")
             raise HTTPException(status_code=502, detail=result["error"])
 
-        # 流式响应
+        # Streaming response
         if result.get("stream"):
             return StreamingResponse(
                 _stream_responses_sse(
@@ -2007,11 +2002,11 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
         response_text = result.get("response_text", "")
         tool_calls_made = result.get("tool_calls_made", [])
 
-        # 保存 AI 回复
+        # Save AI reply
         conversation_store.add_message(conv_id, "assistant", response_text)
 
-        # 🔑 关键修复: 当请求了 stream=True 但 orchestrator 返回非流式结果 (如有 tools) 时,
-        # 将完整响应包装为 SSE 流式输出, 否则 Codex 等客户端收到 application/json 会无法显示
+        # 🔑 Critical fix: When stream=True requested but orchestrator returns non-streaming result (tools present),
+        # wrap full response as SSE streaming output to prevent Codex display errors
         if req.stream and response_text:
             async def _wrap_text_as_stream(text: str):
                 yield text
@@ -2040,32 +2035,32 @@ async def create_response(req: ResponsesAPIRequest, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("responses API 内部错误: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"内部错误: {e}")
+        logger.error("responses API internal error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
 @app.get("/v1/responses/{response_id}")
 async def retrieve_response(response_id: str, request: Request):
     """OpenAI Responses API: GET /v1/responses/{response_id}
 
-    检索之前创建的 response (通过 conversation store 实现)
+    Retrieve previously created response (via conversation store)
     """
     check_api_key(request)
-    # 在 conversation_store 中查找对应的 response
-    # 由于我们使用 conversation_id 而非 response_id，这里做简单映射
-    # 真实场景中需要持久化 response 对象
+    # Search for matching response in conversation_store
+    # Since conversations are tracked by conversation_id, response persistence is a stub
+    # In production, response objects would be fully persisted
     raise HTTPException(
         status_code=404,
         detail=f"Response {response_id} not found. Responses are not persisted in this implementation.",
     )
 
 
-# ── 路由: Tools ──────────────────────────────────────────────────────────────
+# ── Route: Tools ──────────────────────────────────────────────────────────────
 
 
 @app.get("/v1/tools")
 async def list_tools(request: Request):
-    """列出所有可用 Tools"""
+    """List all available Tools"""
     check_api_key(request)
     tools = tool_registry.list_enabled()
     return {
@@ -2084,7 +2079,7 @@ async def list_tools(request: Request):
 
 @app.post("/v1/tools/{tool_name}/execute")
 async def execute_tool(tool_name: str, req: ExecuteToolRequest, request: Request):
-    """直接执行 Tool"""
+    """Execute Tool directly"""
     check_api_key(request)
     call_id = f"call_{uuid.uuid4().hex[:16]}"
     result = await tool_registry.execute(
@@ -2101,7 +2096,7 @@ async def execute_tool(tool_name: str, req: ExecuteToolRequest, request: Request
     }
 
 
-# ── 路由: 对话管理 ───────────────────────────────────────────────────────────
+# ── Route: Conversation Management ────────────────────────────────────────────
 
 
 @app.get("/v1/conversations")
@@ -2110,14 +2105,14 @@ async def list_conversations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    """列出对话"""
+    """List conversations"""
     check_api_key(request)
     return {"conversations": conversation_store.list_conversations(limit, offset)}
 
 
 @app.post("/v1/conversations")
 async def create_conversation(req: CreateConversationRequest, request: Request):
-    """创建对话"""
+    """Create conversation"""
     check_api_key(request)
     conv_id = conversation_store.create_conversation(title=req.title, model=req.model)
     return {"id": conv_id, "title": req.title, "model": req.model}
@@ -2125,7 +2120,7 @@ async def create_conversation(req: CreateConversationRequest, request: Request):
 
 @app.get("/v1/conversations/{conv_id}")
 async def get_conversation(conv_id: str, request: Request):
-    """获取对话详情"""
+    """Get conversation details"""
     check_api_key(request)
     conv = conversation_store.get_conversation(conv_id)
     if not conv:
@@ -2136,7 +2131,7 @@ async def get_conversation(conv_id: str, request: Request):
 
 @app.get("/v1/conversations/{conv_id}/messages")
 async def get_conversation_messages(conv_id: str, request: Request):
-    """获取对话消息列表"""
+    """Get conversation message list"""
     check_api_key(request)
     if not conversation_store.get_conversation(conv_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -2145,19 +2140,19 @@ async def get_conversation_messages(conv_id: str, request: Request):
 
 @app.delete("/v1/conversations/{conv_id}")
 async def delete_conversation(conv_id: str, request: Request):
-    """删除对话"""
+    """Delete conversation"""
     check_api_key(request)
     if not conversation_store.delete_conversation(conv_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {"status": "deleted", "id": conv_id}
 
 
-# ── 路由: 提示词 ─────────────────────────────────────────────────────────────
+# ── Route: Prompts ────────────────────────────────────────────────────────────
 
 
 @app.get("/v1/prompts")
 async def get_prompts(request: Request, document_state: str = "Blank"):
-    """获取 Copilot 建议提示词列表"""
+    """Get Copilot suggested prompt list"""
     check_api_key(request)
     result = await augloop.get_prompts(document_state)
     if "error" in result:
@@ -2165,12 +2160,12 @@ async def get_prompts(request: Request, document_state: str = "Blank"):
     return result
 
 
-# ── 路由: 状态 ───────────────────────────────────────────────────────────────
+# ── Route: Status ─────────────────────────────────────────────────────────────
 
 
 @app.get("/status")
 async def status():
-    """代理状态 & Token 有效性"""
+    """Proxy status & Token validity"""
     hc_status = "unknown"
     try:
         hc = await augloop.health_check()
@@ -2198,23 +2193,23 @@ async def status():
     }
 
 
-# ── 路由: Token 管理 ─────────────────────────────────────────────────────────
+# ── Route: Token Management ───────────────────────────────────────────────────
 
 
 @app.get("/token/status")
 async def token_status(request: Request):
-    """Token 管理器详细状态"""
+    """Token Manager detailed status"""
     check_api_key(request)
     return token_manager.get_status()
 
 
 @app.post("/token/refresh")
 async def token_refresh(req: RefreshTokenRequest, request: Request):
-    """强制刷新 Token"""
+    """Force refresh Token"""
     check_api_key(request)
     old_preview = token_manager.token_preview
     new_token = await token_manager.refresh()
-    # 同步到 AugLoop clients
+    # Sync to AugLoop clients
     augloop.update_token(new_token)
     ws_client.update_token(new_token, config.get("augloop", {}).get("auth_token", ""))
     return {
@@ -2228,13 +2223,13 @@ async def token_refresh(req: RefreshTokenRequest, request: Request):
 
 @app.post("/token/extract-har")
 async def token_extract_har(req: ExtractTokenRequest, request: Request):
-    """从 HAR 文件提取 Token"""
+    """Extract Token from HAR file"""
     check_api_key(request)
     har_path = Path(req.har_file)
     if not har_path.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {har_path}")
     result = token_manager.extract_from_har(str(har_path))
-    # 同步到 AugLoop clients
+    # Sync to AugLoop clients
     if token_manager.has_token:
         augloop.update_token(token_manager.token)
         ws_client.update_token(token_manager.token, config.get("augloop", {}).get("auth_token", ""))
@@ -2243,13 +2238,13 @@ async def token_extract_har(req: ExtractTokenRequest, request: Request):
 
 @app.post("/admin/extract-token")
 async def extract_token(req: ExtractTokenRequest, request: Request):
-    """从 HAR 文件提取 Token (兼容旧版)"""
+    """Extract Token from HAR file (legacy compatibility)"""
     return await token_extract_har(req, request)
 
 
 @app.post("/token/frida-hunt")
 async def frida_hunt(req: FridaHuntRequest, request: Request):
-    """启动 Frida Token 截获 (后台任务)"""
+    """Start Frida Token capture (background task)"""
     check_api_key(request)
     result = token_task_mgr.start_frida(timeout=req.timeout)
     if result == "already_running":
@@ -2263,14 +2258,14 @@ async def frida_hunt(req: FridaHuntRequest, request: Request):
 
 @app.get("/token/frida-status")
 async def frida_status(request: Request):
-    """查询 Frida 截获状态"""
+    """Query Frida capture status"""
     check_api_key(request)
     return token_task_mgr.get_frida_status()
 
 
 @app.post("/token/wam-acquire")
 async def wam_acquire(req: WamAcquireRequest, request: Request):
-    """启动 WAM Token 获取 (后台任务)"""
+    """Start WAM Token acquisition (background task)"""
     check_api_key(request)
     result = token_task_mgr.start_wam()
     if result == "already_running":
@@ -2283,14 +2278,14 @@ async def wam_acquire(req: WamAcquireRequest, request: Request):
 
 @app.get("/token/wam-status")
 async def wam_status_endpoint(request: Request):
-    """查询 WAM 获取状态"""
+    """Query WAM acquisition status"""
     check_api_key(request)
     return token_task_mgr.get_wam_status()
 
 
 @app.post("/token/manual")
 async def set_manual_token(req: ManualTokenRequest, request: Request):
-    """手动设置 Token"""
+    """Manually configure Token"""
     check_api_key(request)
     if req.bearer_token:
         token_manager.set_token(req.bearer_token, source="manual")
@@ -2307,7 +2302,7 @@ async def set_manual_token(req: ManualTokenRequest, request: Request):
 
 
 async def _validate_jwe_token(token: str) -> bool:
-    """通过 Workflow API 验证 JWE Token 是否有效 (不是 HealthCheck)"""
+    """Validate whether JWE Token is active via Workflow API (not HealthCheck)"""
     if not token:
         return False
     try:
@@ -2323,20 +2318,20 @@ async def _validate_jwe_token(token: str) -> bool:
             resp = await hc.post(url, json=body, headers=headers)
             is_valid = resp.status_code != 401
             if not is_valid:
-                logger.warning("[JWE验证] Token 已过期 (HTTP %d)", resp.status_code)
+                logger.warning("[JWE Validation] Token expired (HTTP %d)", resp.status_code)
             return is_valid
     except Exception as e:
-        logger.warning("[JWE验证] 验证异常: %s", e)
+        logger.warning("[JWE Validation] Validation exception: %s", e)
         return False
 
 
 @app.post("/token/msal")
 async def msal_acquire_token(request: Request):
     """
-    🔑 MSAL 交互式认证获取 JWE Token
+    🔑 MSAL Interactive Authentication for JWE Token
 
-    通过 MSAL Device Code Flow 获取 MSA Token，然后创建 AugLoop 会话获取 JWE。
-    首次使用需要浏览器交互，后续可自动刷新。
+    Acquires MSA Token via MSAL Device Code Flow, then initializes AugLoop session to get JWE.
+    Requires browser interaction on first use; subsequent refreshes can be automated.
     """
     check_api_key(request)
 
@@ -2344,37 +2339,37 @@ async def msal_acquire_token(request: Request):
         from augloop_token_final import MSATokenProvider, AugLoopSessionClient
 
         provider = MSATokenProvider()
-        logger.info("[MSAL] 获取 MSA Token...")
+        logger.info("[MSAL] Acquiring MSA Token...")
 
-        # 获取 MSA Token (可能需要交互式认证)
+        # Acquire MSA Token (may require interactive authentication)
         token_data = await provider.get_token()
         if not token_data:
             return {
                 "status": "error",
-                "error": "MSA Token 获取失败。请检查终端输出完成设备认证。",
-                "message": "请查看服务器终端的 Device Code 提示，在浏览器中完成认证。",
+                "error": "Failed to acquire MSA Token. Please check terminal output to complete device authentication.",
+                "message": "Please view the Device Code prompt in the server terminal and complete authentication in your browser.",
             }
 
         msa_token = token_data["access_token"]
-        logger.info("[MSAL] MSA Token 获取成功 (%d chars)", len(msa_token))
+        logger.info("[MSAL] MSA Token acquired successfully (%d chars)", len(msa_token))
 
-        # 创建 AugLoop 会话获取 JWE
+        # Create AugLoop session to acquire JWE
         client = AugLoopSessionClient()
         jwe_token = await client.create_session(msa_token)
 
         if jwe_token:
-            # 保存 JWE Token
+            # Save JWE Token
             token_file = Path(__file__).parent / ".augloop_token"
             token_file.write_text(jwe_token, encoding="utf-8")
             token_manager.set_token(jwe_token, source="msal")
             config.setdefault("augloop", {})["bearer_token"] = jwe_token
             save_config(config)
 
-            # 更新运行中的客户端
+            # Update running clients
             augloop.update_token(jwe_token)
             ws_client.update_token(jwe_token, config.get("augloop", {}).get("auth_token", ""))
 
-            # 验证
+            # Validate
             jwe_valid = await _validate_jwe_token(jwe_token)
 
             return {
@@ -2383,47 +2378,47 @@ async def msal_acquire_token(request: Request):
                 "jwe_token": jwe_token[:50] + "...",
                 "jwe_token_length": len(jwe_token),
                 "jwe_validated": jwe_valid,
-                "message": f"JWE Token 通过 MSAL 获取成功! (验证: {'通过' if jwe_valid else '未通过'})",
+                "message": f"JWE Token acquired via MSAL! (Validation: {'PASSED' if jwe_valid else 'FAILED'})",
             }
         else:
             return {
                 "status": "error",
-                "error": "AugLoop 会话创建失败，无法获取 JWE Token",
-                "message": "MSA Token 获取成功但 AugLoop 会话创建失败。协议格式可能需要更新。",
+                "error": "AugLoop session creation failed, unable to acquire JWE Token",
+                "message": "MSA Token acquired but AugLoop session creation failed. Protocol format may need updating.",
             }
 
     except ImportError:
-        return {"status": "error", "error": "msal 库未安装，请运行: pip install msal"}
+        return {"status": "error", "error": "msal library not installed, please run: pip install msal"}
     except Exception as e:
-        logger.error("[MSAL] 异常: %s", e, exc_info=True)
+        logger.error("[MSAL] Exception: %s", e, exc_info=True)
         return {"status": "error", "error": str(e)}
 
 
 @app.post("/token/auto")
 async def auto_acquire_token(request: Request):
     """
-    🔑 全自动获取双 Token (JWE Bearer + JWT authToken) - 不需要 Frida!
+    🔑 Fully automated dual-token acquisition (JWE Bearer + JWT authToken) - No Frida required!
 
-    流程:
-    1. 优先: 纯 Python 内存扫描 Excel 进程 (ctypes ReadProcessMemory)
-       → 同时获取 JWE Bearer Token 和 JWT authToken, <1秒完成
-    2. 回退: WebSocket Phase 1 获取 JWT authToken
-       → 需要 JWE Token, 24h 有效
+    Flow:
+    1. Primary: Pure Python memory scan of Excel process (ctypes ReadProcessMemory)
+       -> Acquires both JWE Bearer Token and JWT authToken in <1 second
+    2. Fallback: WebSocket Phase 1 to acquire JWT authToken
+       -> Requires JWE Token, valid for 24h
     """
     check_api_key(request)
 
     try:
-        # 初始化 jwe_token (从当前配置加载，后续可能被更新)
+        # Initialize jwe_token (loaded from current config, may be updated later)
         jwe_token = config.get("augloop", {}).get("bearer_token", "")
 
-        # ── 方案 1: 纯 Python 内存扫描 + Workflow API 验证 ──
+        # ── Strategy 1: Pure Python memory scan + Workflow API validation ──
         try:
             from memory_token_scanner import scan_once as memory_scan_once
             from excel_trigger import trigger_excel_token_refresh
             import httpx as _httpx_validate
-            logger.info("[AutoToken] 尝试内存扫描获取双 Token...")
+            logger.info("[AutoToken] Attempting memory scan for dual tokens...")
 
-            # 1a. 扫描所有 Token
+            # 1a. Scan all tokens
             all_tokens = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: memory_scan_once(find_all=True)
             )
@@ -2432,7 +2427,7 @@ async def auto_acquire_token(request: Request):
             jwt_token = jwt_list[-1] if jwt_list else ""
 
             if not jwe_list and not jwt_list:
-                logger.warning("[AutoToken] 内存中未找到 Token, 尝试触发 Excel...")
+                logger.warning("[AutoToken] No token found in memory, attempting to trigger Excel...")
                 trigger_excel_token_refresh(wait_seconds=5)
                 all_tokens = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: memory_scan_once(find_all=True)
@@ -2441,13 +2436,13 @@ async def auto_acquire_token(request: Request):
                 jwt_list = all_tokens.get("jwt_list", [])
                 jwt_token = jwt_list[-1] if jwt_list else ""
 
-            # 1b. 用 Workflow API 验证每个 JWE Token (HealthCheck 不验证 Token!)
+            # 1b. Validate each JWE Token via Workflow API (HealthCheck does not validate tokens!)
             valid_jwe = None
             if jwe_list:
-                logger.info("[AutoToken] 找到 %d 个 JWE Token, 通过 Workflow API 验证...", len(jwe_list))
+                logger.info("[AutoToken] Found %d JWE Token(s), validating via Workflow API...", len(jwe_list))
 
                 async def validate_jwe(token: str) -> bool:
-                    """通过 Workflow API 验证 JWE Token (不是 HealthCheck)"""
+                    """Validate JWE Token via Workflow API (not HealthCheck)"""
                     try:
                         url = f"{augloop.base_url}/workflows/{augloop.workflow}?includeMetadata=true&tryResolveUpstreamDependencies=true&outputTypes=AugLoop_OfficeCopilotOrchestration_CopilotPromptsResponse"
                         body = {"payload": {}, "payloadSchema": {"category": 1, "schema": {"name": "AugLoop_OfficeCopilotOrchestration_CopilotPromptsSignal"}}, "requestedSchema": {"category": 1, "schema": {"name": "AugLoop_OfficeCopilotOrchestration_CopilotPromptsResponse"}}}
@@ -2458,40 +2453,40 @@ async def auto_acquire_token(request: Request):
                     except Exception:
                         return False
 
-                # 从最后找到的开始验证 (通常是最新分配的内存)
+                # Validate starting from newest (usually most recently allocated memory)
                 for i, token in enumerate(reversed(jwe_list)):
                     idx = len(jwe_list) - i
-                    logger.info("[AutoToken] 验证 JWE Token #%d (%d chars)...", idx, len(token))
+                    logger.info("[AutoToken] Validating JWE Token #%d (%d chars)...", idx, len(token))
                     is_valid = await validate_jwe(token)
                     if is_valid:
                         valid_jwe = token
-                        logger.info("[AutoToken] [✓] JWE Token #%d 验证通过!", idx)
+                        logger.info("[AutoToken] [✓] JWE Token #%d verified valid!", idx)
                         break
                     else:
-                        logger.info("[AutoToken] [✗] JWE Token #%d 已过期", idx)
+                        logger.info("[AutoToken] [✗] JWE Token #%d expired", idx)
 
-                # 1c. 如果所有 Token 都过期, 触发 Excel 刷新
+                # 1c. If all tokens expired, trigger Excel refresh
                 if not valid_jwe and jwe_list:
-                    logger.warning("[AutoToken] 所有 JWE Token 已过期! 触发 Excel 刷新...")
+                    logger.warning("[AutoToken] All JWE Tokens expired! Triggering Excel refresh...")
                     await asyncio.get_event_loop().run_in_executor(
                         None, lambda: trigger_excel_token_refresh(wait_seconds=5)
                     )
-                    # 重新扫描
-                    logger.info("[AutoToken] 重新扫描内存...")
+                    # Rescan
+                    logger.info("[AutoToken] Rescanning memory...")
                     all_tokens = await asyncio.get_event_loop().run_in_executor(
                         None, lambda: memory_scan_once(find_all=True)
                     )
                     new_jwe_list = all_tokens.get("jwe_list", [])
                     new_jwt_list = all_tokens.get("jwt_list", [])
 
-                    # 检查是否有新 Token
+                    # Check for new Token
                     for token in new_jwe_list:
                         if token not in jwe_list:
-                            logger.info("[AutoToken] 发现新 JWE Token! 验证中...")
+                            logger.info("[AutoToken] New JWE Token detected! Validating...")
                             is_valid = await validate_jwe(token)
                             if is_valid:
                                 valid_jwe = token
-                                logger.info("[AutoToken] [✓] 新 JWE Token 验证通过!")
+                                logger.info("[AutoToken] [✓] New JWE Token verified valid!")
                                 break
 
                     if new_jwt_list:
@@ -2500,23 +2495,23 @@ async def auto_acquire_token(request: Request):
             if valid_jwe or jwt_token:
                 jwe_token = valid_jwe or ""
 
-                # 保存 JWE Token
+                # Save JWE Token
                 if jwe_token:
                     token_file = Path(__file__).parent / ".augloop_token"
                     token_file.write_text(jwe_token, encoding="utf-8")
                     token_manager.set_token(jwe_token, source="memory_scan")
                     config.setdefault("augloop", {})["bearer_token"] = jwe_token
-                    logger.info("[AutoToken] JWE Bearer Token 获取并验证成功 (%d chars)", len(jwe_token))
+                    logger.info("[AutoToken] JWE Bearer Token acquired and verified (%d chars)", len(jwe_token))
 
-                # 保存 JWT authToken
+                # Save JWT authToken
                 if jwt_token:
                     config.setdefault("augloop", {})["auth_token"] = jwt_token
-                    logger.info("[AutoToken] JWT authToken 获取成功 (%d chars, 共 %d 个候选)",
+                    logger.info("[AutoToken] JWT authToken acquired successfully (%d chars, %d candidates total)",
                                 len(jwt_token), len(jwt_list))
 
                 save_config(config)
 
-                # 更新所有客户端 (关键: augloop HTTP 客户端也必须更新!)
+                # Update all clients (critical: augloop HTTP client must also be updated!)
                 augloop.update_token(jwe_token)
                 ws_client.update_token(jwe_token, jwt_token)
 
@@ -2529,15 +2524,15 @@ async def auto_acquire_token(request: Request):
                     "auth_token": jwt_token[:50] + "..." if jwt_token else "",
                     "auth_token_length": len(jwt_token) if jwt_token else 0,
                     "jwt_candidates": len(jwt_list),
-                    "message": f"双 Token 通过内存扫描获取成功! JWE {'已验证' if valid_jwe else '未验证'}, JWT {len(jwt_list)} 个候选",
+                    "message": f"Dual tokens acquired via memory scan! JWE {'VERIFIED' if valid_jwe else 'UNVERIFIED'}, JWT {len(jwt_list)} candidates",
                 }
             else:
-                logger.warning("[AutoToken] 内存扫描未找到有效 Token, 尝试回退方案...")
+                logger.warning("[AutoToken] Memory scan found no valid Token, attempting fallback...")
         except Exception as e:
-            logger.warning("[AutoToken] 内存扫描失败: %s, 尝试回退方案...", e)
+            logger.warning("[AutoToken] Memory scan failed: %s, attempting fallback...", e)
 
-        # ── 方案 2: WebSocket Phase 1 (获取 JWT + 可能获取 JWE) ──
-        logger.info("[AutoToken] 尝试 WebSocket Phase 1...")
+        # ── Strategy 2: WebSocket Phase 1 (Acquires JWT + possible JWE) ──
+        logger.info("[AutoToken] Attempting WebSocket Phase 1...")
         result = await ws_client.auto_acquire_auth_token()
 
         if result.get("status") == "ok":
@@ -2545,34 +2540,34 @@ async def auto_acquire_token(request: Request):
             jwe_from_phase1 = result.get("jwe_token", "")
             expires_in = result.get("expires_in", 86400)
 
-            # 保存 JWT authToken
+            # Save JWT authToken
             if auth_token:
                 config.setdefault("augloop", {})["auth_token"] = auth_token
-                logger.info("[AutoToken] authToken 获取成功 (有效期 %.1fh)", expires_in / 3600)
+                logger.info("[AutoToken] authToken acquired successfully (valid %.1fh)", expires_in / 3600)
 
-            # 🔑 如果 Phase 1 返回了 JWE accessToken，更新 JWE
+            # 🔑 If Phase 1 returned JWE accessToken, update JWE
             if jwe_from_phase1:
                 jwe_token = jwe_from_phase1
                 config.setdefault("augloop", {})["bearer_token"] = jwe_token
                 token_file = Path(__file__).parent / ".augloop_token"
                 token_file.write_text(jwe_token, encoding="utf-8")
                 token_manager.set_token(jwe_token, source="websocket_phase1")
-                logger.info("[AutoToken] JWE accessToken 从 Phase 1 获取成功! (%d chars)", len(jwe_token))
+                logger.info("[AutoToken] JWE accessToken acquired from Phase 1! (%d chars)", len(jwe_token))
 
             save_config(config)
 
-            # 🔑 更新所有运行中的客户端 (关键!)
+            # 🔑 Update all running clients (critical!)
             augloop.update_token(jwe_token)
             ws_client.update_token(jwe_token, auth_token)
 
-            # 验证 JWE Token 是否有效
+            # Validate whether JWE Token is valid
             jwe_valid = False
             if jwe_token:
                 jwe_valid = await _validate_jwe_token(jwe_token)
                 if jwe_valid:
-                    logger.info("[AutoToken] JWE Token 验证通过!")
+                    logger.info("[AutoToken] JWE Token verified valid!")
                 else:
-                    logger.warning("[AutoToken] JWE Token 验证失败 (可能已过期)")
+                    logger.warning("[AutoToken] JWE Token verification failed (may be expired)")
 
             save_config(config)
 
@@ -2588,7 +2583,7 @@ async def auto_acquire_token(request: Request):
                     "expires_in_hours": round(expires_in / 3600, 1),
                     "session_key": result.get("session_key", ""),
                     "slice_url": result.get("slice_url", ""),
-                    "message": f"双 Token 获取成功! JWE 已验证, JWT 有效期 {expires_in / 3600:.1f}h",
+                    "message": f"Dual tokens acquired! JWE verified, JWT valid {expires_in / 3600:.1f}h",
                 }
             elif jwe_from_phase1:
                 return {
@@ -2598,40 +2593,40 @@ async def auto_acquire_token(request: Request):
                     "jwe_validated": False,
                     "auth_token": auth_token[:50] + "..." if auth_token else "",
                     "expires_in": expires_in,
-                    "message": f"JWT 获取成功但 JWE 验证失败。JWE 可能已过期，请启动 Excel 后重试。",
+                    "message": "JWT acquired successfully but JWE validation failed. JWE may be expired, please start Excel and retry.",
                 }
             else:
-                # Phase 1 没有返回 JWE，检查当前 JWE 是否有效
+                # Phase 1 did not return JWE; check if current JWE is valid
                 current_jwe = config.get("augloop", {}).get("bearer_token", "")
                 if current_jwe:
                     jwe_valid = await _validate_jwe_token(current_jwe)
                     if jwe_valid:
-                        logger.info("[AutoToken] 当前 JWE Token 仍然有效")
+                        logger.info("[AutoToken] Current JWE Token remains valid")
                         return {
                             "status": "ok",
                             "method": "websocket_phase1",
                             "jwe_validated": True,
                             "auth_token": auth_token[:50] + "..." if auth_token else "",
                             "expires_in": expires_in,
-                            "message": f"JWT 刷新成功, JWE 仍然有效。有效期 {expires_in / 3600:.1f}h",
+                            "message": f"JWT refreshed successfully, JWE remains valid. Validity: {expires_in / 3600:.1f}h",
                         }
 
-                # JWE 无效且无法刷新
+                # JWE is invalid and could not be refreshed
                 return {
                     "status": "partial",
                     "method": "websocket_phase1",
                     "auth_token": auth_token[:50] + "..." if auth_token else "",
                     "expires_in": expires_in,
                     "jwe_validated": False,
-                    "message": "JWT authToken 获取成功，但 JWE Bearer Token 已过期且无法自动刷新。请启动 Excel 并重新获取，或使用 /token/msal 进行交互式认证。",
+                    "message": "JWT authToken acquired successfully, but JWE Bearer Token has expired and cannot be auto-refreshed. Please start Excel and retry, or use /token/msal for interactive authentication.",
                 }
         else:
-            error = result.get("error", "未知错误")
-            logger.error("[AutoToken] 所有方案均失败: %s", error)
-            return {"status": "error", "error": f"内存扫描和 WebSocket 均失败: {error}"}
+            error = result.get("error", "Unknown error")
+            logger.error("[AutoToken] All strategies failed: %s", error)
+            return {"status": "error", "error": f"Both memory scan and WebSocket failed: {error}"}
 
     except Exception as e:
-        logger.error("[AutoToken] 异常: %s", e, exc_info=True)
+        logger.error("[AutoToken] Exception: %s", e, exc_info=True)
         return {"status": "error", "error": str(e)}
 
 
@@ -2640,7 +2635,7 @@ async def auto_acquire_token(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    """Desktop UI 桌面端界面"""
+    """Desktop Web UI Interface"""
     return DESKTOP_UI_HTML
 
 
@@ -2959,12 +2954,12 @@ loadStatus();
 """
 
 
-# ── 启动 & 关闭 ──────────────────────────────────────────────────────────────
+# ── Startup & Shutdown ────────────────────────────────────────────────────────
 
 
 @app.on_event("startup")
 async def startup():
-    """启动时初始化"""
+    """Initialize on startup"""
     logger.info("=" * 60)
     logger.info("AugLoop Copilot Proxy v2.0.0")
     logger.info("  Token: %s", "[OK] configured" if token_manager.has_token else "[X] not set")
@@ -2974,7 +2969,7 @@ async def startup():
     logger.info("  Conversations DB: %s", DB_PATH)
     logger.info("=" * 60)
 
-    # 启动 Token 自动刷新 (从 config 读取 interval, 默认 120s)
+    # Start Token auto-refresh (interval read from config, default 120s)
     _tm_cfg = config.get("token_manager", {})
     _refresh_interval = _tm_cfg.get("refresh_interval", 120)
     token_manager.start_auto_refresh(interval=_refresh_interval)
@@ -2985,7 +2980,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """关闭时清理"""
+    """Clean up on shutdown"""
     await token_manager.stop_auto_refresh()
     await augloop.close()
     await ws_client.close()

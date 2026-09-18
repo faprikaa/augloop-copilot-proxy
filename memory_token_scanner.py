@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-memory_token_scanner.py - 纯 Python 内存扫描 JWE Token (不依赖 Frida)
+memory_token_scanner.py - Pure Python memory scanner for JWE Token (no Frida required)
 
-使用 Windows API (ctypes) 直接读取 Excel 进程内存，
-扫描 JWE Token (eyJhbGciOiJkaXIi...) 和 JWT Token (eyJhbGciOiJSUzI1NiI...)。
+Uses Windows API (ctypes) to directly read Excel process memory,
+scanning for JWE Token (eyJhbGciOiJkaXIi...) and JWT Token (eyJhbGciOiJSUzI1NiI...).
 
-原理:
-  1. OpenProcess 打开 Excel 进程 (需要 PROCESS_VM_READ 权限)
-  2. VirtualQueryEx 枚举可读内存区域
-  3. ReadProcessMemory 读取内存内容
-  4. 正则匹配 JWE/JWT Token
+Mechanism:
+  1. OpenProcess opens Excel process (requires PROCESS_VM_READ permissions)
+  2. VirtualQueryEx enumerates readable memory regions
+  3. ReadProcessMemory reads memory contents
+  4. Regex matches JWE/JWT Tokens
 
-优势:
-  - 不需要安装 Frida
-  - 不需要 Excel 发送网络请求 (只要 Token 在内存中)
-  - 速度快 (直接内存扫描，无脚本注入开销)
-  - 可以后台自动运行
+Advantages:
+  - No need to install Frida
+  - Excel doesn't need to send active network requests (as long as token is in memory)
+  - Fast (direct memory scan, no script injection overhead)
+  - Can run automatically in the background
 
-用法:
-  python memory_token_scanner.py              # 扫描一次并输出 Token
-  python memory_token_scanner.py --daemon     # 后台守护进程模式
-  python memory_token_scanner.py --once       # 扫描一次后退出
+Usage:
+  python memory_token_scanner.py              # Scan once and output Token
+  python memory_token_scanner.py --daemon     # Background daemon mode
+  python memory_token_scanner.py --once       # Scan once and exit
 """
 
 import argparse
@@ -35,7 +35,7 @@ from pathlib import Path
 
 logger = logging.getLogger("scanner")
 
-# ── Windows API 常量 ────────────────────────────────────────────────────────
+# ── Windows API Constants ───────────────────────────────────────────────────
 
 PROCESS_VM_READ = 0x0010
 PROCESS_QUERY_INFORMATION = 0x0400
@@ -46,7 +46,7 @@ PAGE_READONLY = 0x02
 PAGE_EXECUTE_READ = 0x20
 PAGE_WRITECOPY = 0x08
 
-# ── Windows API 结构体 ──────────────────────────────────────────────────────
+# ── Windows API Structures ──────────────────────────────────────────────────
 
 class MEMORY_BASIC_INFORMATION(ctypes.Structure):
     _fields_ = [
@@ -73,7 +73,7 @@ class PROCESSENTRY32(ctypes.Structure):
         ("szExeFile", ctypes.c_char * 260),
     ]
 
-# ── Windows API 函数 ────────────────────────────────────────────────────────
+# ── Windows API Functions ───────────────────────────────────────────────────
 
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 psapi = ctypes.WinDLL('psapi', use_last_error=True)
@@ -109,7 +109,7 @@ kernel32.Process32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY3
 # TH32CS_SNAPPROCESS = 0x00000002
 TH32CS_SNAPPROCESS = 0x2
 
-# ── Token 正则 ─────────────────────────────────────────────────────────────
+# ── Token Regex ─────────────────────────────────────────────────────────────
 
 # JWE Token: eyJhbGciOiJkaXIi... (alg=dir, JWE encrypted)
 JWE_PATTERN = re.compile(rb'(eyJhbGciOiJkaXIi[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)')
@@ -117,12 +117,12 @@ JWE_PATTERN = re.compile(rb'(eyJhbGciOiJkaXIi[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*\.[
 # JWT Token (RS256): eyJhbGciOiJSUzI1NiI... (anonymousToken)
 JWT_PATTERN = re.compile(rb'(eyJhbGciOiJSUzI1NiI[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)')
 
-# 最小 Token 长度 (过滤短匹配)
+# Minimum Token length (filter short matches)
 MIN_TOKEN_LEN = 200
 
 
 def find_excel_processes() -> list[int]:
-    """查找所有 Excel 进程的 PID"""
+    """Find PIDs of all Excel processes"""
     snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
     if snapshot == wintypes.HANDLE(-1).value or snapshot == 0:
         return []
@@ -136,7 +136,7 @@ def find_excel_processes() -> list[int]:
             name = pe.szExeFile.decode('utf-8', errors='replace').lower()
             if 'excel' in name and name.endswith('.exe'):
                 pids.append(pe.th32ProcessID)
-                logger.info("找到 Excel 进程: PID=%d (%s)", pe.th32ProcessID, name)
+                logger.info("Found Excel process: PID=%d (%s)", pe.th32ProcessID, name)
             if not kernel32.Process32Next(snapshot, ctypes.byref(pe)):
                 break
 
@@ -146,20 +146,20 @@ def find_excel_processes() -> list[int]:
 
 def scan_process_memory(pid: int, find_all: bool = False) -> dict:
     """
-    扫描进程内存，查找 JWE 和 JWT Token
+    Scan process memory for JWE and JWT Tokens
 
     Args:
-        pid: 进程 ID
-        find_all: 如果 True, 返回所有找到的唯一 Token 列表
+        pid: Process ID
+        find_all: If True, returns all unique tokens found
 
     Returns:
-        find_all=False: {"jwe": "token...", "jwt": "token..."} 或空 dict
-        find_all=True:  {"jwe_list": ["t1","t2"], "jwt_list": ["t1"]} 或空 dict
+        find_all=False: {"jwe": "token...", "jwt": "token..."} or empty dict
+        find_all=True:  {"jwe_list": ["t1","t2"], "jwt_list": ["t1"]} or empty dict
     """
     process = kernel32.OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
     if not process:
         err = ctypes.get_last_error()
-        logger.error("OpenProcess 失败 (PID=%d, error=%d) - 可能需要管理员权限", pid, err)
+        logger.error("OpenProcess failed (PID=%d, error=%d) - Administrator privileges may be required", pid, err)
         return {}
 
     try:
@@ -176,7 +176,7 @@ def scan_process_memory(pid: int, find_all: bool = False) -> dict:
 
         region_count = 0
         total_scanned = 0
-        max_region_size = 64 * 1024 * 1024  # 跳过大于 64MB 的区域
+        max_region_size = 64 * 1024 * 1024  # Skip regions larger than 64MB
 
         while address < max_addr:
             result = kernel32.VirtualQueryEx(
@@ -189,21 +189,21 @@ def scan_process_memory(pid: int, find_all: bool = False) -> dict:
             if result == 0:
                 break
 
-            # BaseAddress 可能是 None (NULL)
+            # BaseAddress might be None (NULL)
             base_addr = mbi.BaseAddress
             if base_addr is None:
-                # NULL 区域，跳过
+                # NULL region, skip
                 address += mbi.RegionSize if mbi.RegionSize else 0x1000
                 continue
 
-            # 只扫描已提交的可读内存
+            # Only scan committed readable memory
             if (mbi.State == MEM_COMMIT and
                 mbi.Protect in (PAGE_READWRITE, PAGE_READONLY, PAGE_EXECUTE_READ, PAGE_WRITECOPY) and
                 mbi.RegionSize <= max_region_size):
 
                 region_size = mbi.RegionSize
 
-                # 分块读取 (避免一次性分配大内存)
+                # Chunked reading (avoids allocating large memory at once)
                 chunk_size = min(region_size, 4 * 1024 * 1024)  # 4MB chunks
                 offset = 0
 
@@ -221,7 +221,7 @@ def scan_process_memory(pid: int, find_all: bool = False) -> dict:
                         total_scanned += len(data)
 
                         if find_all:
-                            # 收集所有唯一 Token
+                            # Collect all unique Tokens
                             for m in JWE_PATTERN.finditer(data):
                                 token = m.group(0).decode('ascii', errors='replace')
                                 if len(token) > MIN_TOKEN_LEN and token not in jwe_seen:
@@ -233,10 +233,10 @@ def scan_process_memory(pid: int, find_all: bool = False) -> dict:
                                 token = m.group(0).decode('ascii', errors='replace')
                                 if len(token) > MIN_TOKEN_LEN:
                                     results["jwe"] = token
-                                    logger.info("[★] JWE Token 找到! (%d chars)", len(token))
+                                    logger.info("[★] JWE Token found! (%d chars)", len(token))
                                     break
 
-                        # 搜索 JWT Token
+                        # Search for JWT Token
                         if find_all:
                             for m in JWT_PATTERN.finditer(data):
                                 token = m.group(0).decode('ascii', errors='replace')
@@ -249,25 +249,26 @@ def scan_process_memory(pid: int, find_all: bool = False) -> dict:
                                 token = m.group(0).decode('ascii', errors='replace')
                                 if len(token) > MIN_TOKEN_LEN:
                                     results["jwt"] = token
-                                    logger.info("[★] JWT Token 找到! (%d chars)", len(token))
+                                    logger.info("[★] JWT Token found! (%d chars)", len(token))
                                     break
 
-                        # 如果不需要全部且两个都找到了，提前退出
+                        # If not find_all and both tokens found, exit early
                         if not find_all and results["jwe"] and results["jwt"]:
-                            logger.info("两个 Token 都已找到!")
+                            logger.info("Both tokens found!")
                             return results
 
                     offset += read_size
 
                 region_count += 1
 
-            # 移动到下一个区域
+            # Move to next region
             next_addr = base_addr + mbi.RegionSize
             if next_addr <= address:
                 break
             address = next_addr
 
-        logger.info("扫描完成: %d 个区域, %.1f MB 内存", region_count, total_scanned / (1024*1024))
+        logger.info("Scan completed: %d regions, %.1f MB memory", region_count, total_scanned / (1024*1024))
+
         if find_all:
             return {k: v for k, v in results.items() if v}
         return {k: v for k, v in results.items() if v}
@@ -277,14 +278,14 @@ def scan_process_memory(pid: int, find_all: bool = False) -> dict:
 
 
 def scan_once(find_all: bool = False) -> dict:
-    """扫描一次所有 Excel 进程"""
+    """Scan all Excel processes once"""
     pids = find_excel_processes()
     if not pids:
-        logger.error("未找到 Excel 进程! 请先启动 Excel。")
+        logger.error("Excel process not found! Please start Excel first.")
         return {}
 
     for pid in pids:
-        logger.info("正在扫描 Excel (PID=%d)...", pid)
+        logger.info("Scanning Excel (PID=%d)...", pid)
         results = scan_process_memory(pid, find_all=find_all)
         if results:
             return results
@@ -293,7 +294,7 @@ def scan_once(find_all: bool = False) -> dict:
 
 
 def validate_jwe_token(token: str) -> bool:
-    """通过 AugLoop HealthCheck API 验证 JWE Token 是否有效"""
+    """Validate if JWE Token is valid via AugLoop HealthCheck API"""
     try:
         import httpx
         url = "https://augloop.svc.cloud.microsoft/"
@@ -309,71 +310,71 @@ def validate_jwe_token(token: str) -> bool:
         with httpx.Client(timeout=10) as client:
             resp = client.post(url, json=body, headers=headers)
             if resp.status_code == 200:
-                logger.info("[✓] JWE Token 验证通过 (200 OK)")
+                logger.info("[✓] JWE Token verified successfully (200 OK)")
                 return True
             else:
-                logger.debug("[✗] JWE Token 验证失败 (%d)", resp.status_code)
+                logger.debug("[✗] JWE Token verification failed (%d)", resp.status_code)
                 return False
     except Exception as e:
-        logger.debug("[✗] JWE Token 验证异常: %s", e)
+        logger.debug("[✗] JWE Token verification exception: %s", e)
         return False
 
 
 def find_valid_jwe_token() -> str | None:
     """
-    扫描所有 JWE Token 并找到当前有效的那个
+    Scan all JWE Tokens and find the currently valid one
 
-    内存中可能有多个旧的 JWE Token, 只有最新的是有效的。
-    通过 HealthCheck API 验证找到有效的 Token。
+    There may be multiple stale JWE Tokens in memory; only the newest is valid.
+    Validates token via HealthCheck API to find the active one.
     """
-    logger.info("扫描所有 JWE Token 并验证...")
+    logger.info("Scanning all JWE Tokens and validating...")
     results = scan_once(find_all=True)
 
     jwe_list = results.get("jwe_list", [])
     jwt_list = results.get("jwt_list", [])
 
     if not jwe_list and not jwt_list:
-        logger.warning("未找到任何 Token")
+        logger.warning("No tokens found")
         return None
 
-    logger.info("找到 %d 个 JWE Token, %d 个 JWT Token", len(jwe_list), len(jwt_list))
+    logger.info("Found %d JWE Token(s), %d JWT Token(s)", len(jwe_list), len(jwt_list))
 
-    # 验证每个 JWE Token, 优先验证最后找到的 (通常是最新分配的内存)
+    # Validate each JWE Token, prioritizing the last found (usually newest memory allocation)
     valid_jwe = None
     for i, token in enumerate(reversed(jwe_list)):
         idx = len(jwe_list) - i
-        logger.info("验证 JWE Token #%d (%d chars)...", idx, len(token))
+        logger.info("Validating JWE Token #%d (%d chars)...", idx, len(token))
         if validate_jwe_token(token):
             valid_jwe = token
             break
 
     if not valid_jwe and jwe_list:
-        # 如果都不通过 HealthCheck, 使用最后一个 (可能是缓存问题)
+        # If none pass HealthCheck, fallback to the last one (could be caching issue)
         valid_jwe = jwe_list[-1]
-        logger.warning("所有 JWE Token 验证失败, 使用最后一个 (可能已过期)")
+        logger.warning("All JWE Tokens failed validation, using the last one (may be expired)")
 
     return valid_jwe
 
 
 def clear_stale_tokens(new_jwe: str | None = None, new_jwt: str | None = None):
-    """清除旧的失效 Token, 只保留新的有效 Token
+    """Clear stale/invalid tokens, keeping only new valid tokens
 
     Args:
-        new_jwe: 新的有效 JWE Token (None 则只清空旧文件)
-        new_jwt: 新的有效 JWT Token
+        new_jwe: New valid JWE Token (None clears old file)
+        new_jwt: New valid JWT Token
     """
     token_file = Path(__file__).parent / ".augloop_token"
     config_path = Path(__file__).parent / "config.yaml"
 
-    # 1. 覆写 .augloop_token (只保留新的 JWE, 清除旧的)
+    # 1. Overwrite .augloop_token (keep new JWE, clear old)
     if new_jwe:
         token_file.write_text(new_jwe, encoding="utf-8")
-        logger.info("[清除] .augloop_token 已覆写为新 Token (len=%d), 旧 Token 已清除", len(new_jwe))
+        logger.info("[CLEAR] .augloop_token overwritten with new Token (len=%d), stale token cleared", len(new_jwe))
     elif token_file.exists():
         token_file.write_text("", encoding="utf-8")
-        logger.info("[清除] .augloop_token 已清空 (无有效 Token)")
+        logger.info("[CLEAR] .augloop_token cleared (no valid token)")
 
-    # 2. 更新 config.yaml (只保留新的 bearer_token + auth_token)
+    # 2. Update config.yaml (keep new bearer_token + auth_token)
     try:
         import yaml
         if config_path.exists():
@@ -387,42 +388,41 @@ def clear_stale_tokens(new_jwe: str | None = None, new_jwt: str | None = None):
                 yaml.dump(cfg, allow_unicode=True, default_flow_style=False, sort_keys=False),
                 encoding="utf-8",
             )
-            logger.info("[清除] config.yaml 已更新, 旧 Token 引用已替换")
+            logger.info("[CLEAR] config.yaml updated, old token references replaced")
     except Exception as e:
-        logger.warning("[清除] 更新 config.yaml 失败: %s", e)
+        logger.warning("[CLEAR] Failed to update config.yaml: %s", e)
 
-    # 3. 设置缓存重置标志 (augloop_ws_client 会检测)
+    # 3. Set cache reset flag (augloop_ws_client will detect it)
     import os
     os.environ["JWE_CACHE_RESET"] = "1"
-    logger.info("[清除] JWE 缓存重置标志已设置 (下次 WebSocket 连接将强制刷新)")
-
+    logger.info("[CLEAR] JWE cache reset flag set (next WebSocket connection will force refresh)")
 
 
 def save_tokens(tokens: dict, token_file: Path | None = None):
-    """保存 Token 到文件"""
+    """Save tokens to file"""
     if token_file is None:
         token_file = Path(__file__).parent / ".augloop_token"
 
     if tokens.get("jwe"):
         token_file.write_text(tokens["jwe"], encoding="utf-8")
-        logger.info("[OK] JWE Token 已保存到 %s (%d chars)", token_file, len(tokens["jwe"]))
+        logger.info("[OK] JWE Token saved to %s (%d chars)", token_file, len(tokens["jwe"]))
 
     if tokens.get("jwt"):
-        # JWT 保存到 config
+        # Save JWT to config
         import yaml
         config_path = Path(__file__).parent / "config.yaml"
         if config_path.exists():
             cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
             cfg.setdefault("augloop", {})["auth_token"] = tokens["jwt"]
             config_path.write_text(yaml.dump(cfg, allow_unicode=True, default_flow_style=False), encoding="utf-8")
-            logger.info("[OK] JWT Token 已保存到 config.yaml (%d chars)", len(tokens["jwt"]))
+            logger.info("[OK] JWT Token saved to config.yaml (%d chars)", len(tokens["jwt"]))
 
 
 def daemon_mode(interval: int = 3000):
-    """守护进程模式: 定期扫描并更新 Token"""
-    logger.info("=== 内存 Token 扫描守护进程 ===")
-    logger.info("扫描间隔: %d 秒", interval)
-    logger.info("按 Ctrl+C 退出\n")
+    """Daemon mode: periodically scan and update Token"""
+    logger.info("=== Memory Token Scanner Daemon ===")
+    logger.info("Scan interval: %d seconds", interval)
+    logger.info("Press Ctrl+C to exit\n")
 
     last_jwe = None
     last_jwt = None
@@ -435,32 +435,32 @@ def daemon_mode(interval: int = 3000):
                 if tokens.get("jwe") and tokens["jwe"] != last_jwe:
                     last_jwe = tokens["jwe"]
                     changed = True
-                    logger.info("[刷新] JWE Token 已更新 (%d chars)", len(last_jwe))
+                    logger.info("[REFRESH] JWE Token updated (%d chars)", len(last_jwe))
                 if tokens.get("jwt") and tokens["jwt"] != last_jwt:
                     last_jwt = tokens["jwt"]
                     changed = True
-                    logger.info("[刷新] JWT Token 已更新 (%d chars)", len(last_jwt))
+                    logger.info("[REFRESH] JWT Token updated (%d chars)", len(last_jwt))
                 if changed:
                     save_tokens(tokens)
             else:
-                logger.warning("未找到 Token")
+                logger.warning("No token found")
 
         except KeyboardInterrupt:
-            logger.info("\n退出守护进程")
+            logger.info("\nExiting daemon")
             break
         except Exception as e:
-            logger.error("扫描异常: %s", e)
+            logger.error("Scan exception: %s", e)
 
         time.sleep(interval)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="纯 Python 内存 Token 扫描器 (不依赖 Frida)")
-    parser.add_argument("--once", action="store_true", help="扫描一次后退出")
-    parser.add_argument("--daemon", action="store_true", help="守护进程模式")
-    parser.add_argument("--interval", type=int, default=3000, help="守护进程扫描间隔 (秒)")
-    parser.add_argument("--json", action="store_true", help="JSON 输出")
-    parser.add_argument("--save", action="store_true", help="保存到文件")
+    parser = argparse.ArgumentParser(description="Pure Python Memory Token Scanner (no Frida required)")
+    parser.add_argument("--once", action="store_true", help="Scan once and exit")
+    parser.add_argument("--daemon", action="store_true", help="Daemon mode")
+    parser.add_argument("--interval", type=int, default=3000, help="Daemon scan interval (seconds)")
+    parser.add_argument("--json", action="store_true", help="JSON output")
+    parser.add_argument("--save", action="store_true", help="Save to file")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -473,7 +473,7 @@ def main():
         daemon_mode(args.interval)
         return
 
-    # 单次扫描
+    # Single scan
     tokens = scan_once()
 
     if args.json:
@@ -494,7 +494,7 @@ def main():
                 print(f"\n[★] JWT Token: {tokens['jwt'][:80]}...")
                 print(f"    Length: {len(tokens['jwt'])}")
         else:
-            print("\n[X] 未找到 Token")
+            print("\n[X] No token found")
 
     if args.save and tokens:
         save_tokens(tokens)

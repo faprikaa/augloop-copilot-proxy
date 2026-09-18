@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-tool_registry.py - Tool 注册表 + 执行引擎
+tool_registry.py - Tool Registry + Execution Engine
 
-提供 OpenAI 兼容的 function calling 能力:
-  1. 注册自定义 Tool (name, description, JSON Schema parameters, handler)
-  2. 执行 Tool 调用并返回结果
-  3. 导出 OpenAI tools 格式的 schema 列表
-  4. 内置常用 Tools (时间, HTTP, 文件, Python 执行, 目录列表)
+Provides OpenAI-compatible function calling capabilities:
+  1. Register custom tools (name, description, JSON Schema parameters, handler)
+  2. Execute tool calls and return results
+  3. Export schema list in OpenAI tools format
+  4. Built-in common tools (time, HTTP, file operations, Python execution, directory listing)
 
-用法:
+Usage:
     registry = ToolRegistry()
-    registry.register("my_tool", "描述", {...schema...}, my_handler)
+    registry.register("my_tool", "Description", {...schema...}, my_handler)
     result = await registry.execute("my_tool", {"arg": "value"})
     schemas = registry.get_openai_schemas()
 """
@@ -32,11 +32,11 @@ from typing import Any, Callable, Awaitable
 logger = logging.getLogger("tools")
 
 
-# ── 数据结构 ──────────────────────────────────────────────────────────────────
+# ── Data Structures ─────────────────────────────────────────────────────────
 
 @dataclass
 class ToolResult:
-    """Tool 执行结果"""
+    """Tool execution result"""
     tool_call_id: str
     content: str
     is_error: bool = False
@@ -53,7 +53,7 @@ class ToolResult:
 
 @dataclass
 class ToolDefinition:
-    """Tool 定义"""
+    """Tool definition"""
     name: str
     description: str
     parameters: dict  # JSON Schema
@@ -62,7 +62,7 @@ class ToolDefinition:
     enabled: bool = True
 
     def to_openai_schema(self) -> dict:
-        """导出为 OpenAI function calling 格式"""
+        """Export as OpenAI function calling schema format"""
         return {
             "type": "function",
             "function": {
@@ -73,10 +73,10 @@ class ToolDefinition:
         }
 
 
-# ── Tool 注册表 ───────────────────────────────────────────────────────────────
+# ── Tool Registry ───────────────────────────────────────────────────────────
 
 class ToolRegistry:
-    """Tool 注册表 + 执行引擎"""
+    """Tool registry + execution engine"""
 
     def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
@@ -91,7 +91,7 @@ class ToolRegistry:
         category: str = "custom",
         enabled: bool = True,
     ):
-        """注册一个 Tool"""
+        """Register a tool"""
         self._tools[name] = ToolDefinition(
             name=name,
             description=description,
@@ -100,10 +100,10 @@ class ToolRegistry:
             category=category,
             enabled=enabled,
         )
-        logger.info("已注册 Tool: %s", name)
+        logger.info("Registered tool: %s", name)
 
     def unregister(self, name: str):
-        """取消注册"""
+        """Unregister a tool"""
         self._tools.pop(name, None)
 
     def get(self, name: str) -> ToolDefinition | None:
@@ -116,7 +116,7 @@ class ToolRegistry:
         return [t for t in self._tools.values() if t.enabled]
 
     def get_openai_schemas(self, names: list[str] | None = None) -> list[dict]:
-        """导出 OpenAI tools 格式 schema 列表"""
+        """Export list of schemas in OpenAI tools format"""
         tools = self.list_enabled()
         if names:
             tools = [t for t in tools if t.name in names]
@@ -129,7 +129,7 @@ class ToolRegistry:
         context: dict | None = None,
         tool_call_id: str = "",
     ) -> ToolResult:
-        """执行 Tool 调用"""
+        """Execute a tool call"""
         tool = self._tools.get(name)
         if not tool:
             return ToolResult(
@@ -145,7 +145,7 @@ class ToolRegistry:
             )
 
         ctx = context or {}
-        logger.info("执行 Tool: %s, args=%s", name, json.dumps(arguments, ensure_ascii=False)[:200])
+        logger.info("Executing tool: %s, args=%s", name, json.dumps(arguments, ensure_ascii=False)[:200])
 
         try:
             result = await tool.handler(arguments, ctx)
@@ -157,27 +157,27 @@ class ToolRegistry:
                 content=content,
             )
         except Exception as e:
-            logger.error("Tool '%s' 执行失败: %s", name, e)
+            logger.error("Tool '%s' execution failed: %s", name, e)
             return ToolResult(
                 tool_call_id=tool_call_id,
                 content=f"Error executing tool '{name}': {e}",
                 is_error=True,
             )
 
-    # ── 内置 Tools ──────────────────────────────────────────────────────────
+    # ── Built-in Tools ──────────────────────────────────────────────────────
 
     def _register_builtins(self):
-        """注册内置 Tools"""
+        """Register built-in tools"""
 
         self.register(
             name="get_current_time",
-            description="获取当前日期和时间。可指定时区。",
+            description="Get current date and time. Allows specifying a timezone.",
             parameters={
                 "type": "object",
                 "properties": {
                     "timezone": {
                         "type": "string",
-                        "description": "时区名称，如 'Asia/Shanghai', 'UTC'。默认本地时区。",
+                        "description": "Timezone name, e.g. 'UTC', 'America/New_York'. Defaults to local timezone.",
                     },
                 },
             },
@@ -187,17 +187,17 @@ class ToolRegistry:
 
         self.register(
             name="http_get",
-            description="发起 HTTP GET 请求并返回响应内容。适用于获取网页、API 数据等。",
+            description="Send an HTTP GET request and return the response content. Suitable for fetching web pages, API data, etc.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "请求 URL"},
+                    "url": {"type": "string", "description": "Request URL"},
                     "headers": {
                         "type": "object",
-                        "description": "自定义请求头",
+                        "description": "Custom request headers",
                     },
-                    "timeout": {"type": "number", "description": "超时秒数", "default": 30},
-                    "max_length": {"type": "integer", "description": "返回内容最大长度(字符)", "default": 5000},
+                    "timeout": {"type": "number", "description": "Timeout in seconds", "default": 30},
+                    "max_length": {"type": "integer", "description": "Maximum character length of returned content", "default": 5000},
                 },
                 "required": ["url"],
             },
@@ -207,13 +207,13 @@ class ToolRegistry:
 
         self.register(
             name="read_file",
-            description="读取本地文件内容。支持文本文件。",
+            description="Read local file contents. Supports text files.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "文件路径"},
-                    "encoding": {"type": "string", "description": "文件编码", "default": "utf-8"},
-                    "max_lines": {"type": "integer", "description": "最多读取行数", "default": 500},
+                    "path": {"type": "string", "description": "File path"},
+                    "encoding": {"type": "string", "description": "File encoding", "default": "utf-8"},
+                    "max_lines": {"type": "integer", "description": "Maximum lines to read", "default": 500},
                 },
                 "required": ["path"],
             },
@@ -223,14 +223,14 @@ class ToolRegistry:
 
         self.register(
             name="write_file",
-            description="将内容写入本地文件。如果文件已存在则覆盖。",
+            description="Write content to a local file. Overwrites if file already exists.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "文件路径"},
-                    "content": {"type": "string", "description": "文件内容"},
-                    "encoding": {"type": "string", "description": "文件编码", "default": "utf-8"},
-                    "append": {"type": "boolean", "description": "是否追加模式", "default": False},
+                    "path": {"type": "string", "description": "File path"},
+                    "content": {"type": "string", "description": "File content"},
+                    "encoding": {"type": "string", "description": "File encoding", "default": "utf-8"},
+                    "append": {"type": "boolean", "description": "Whether to append to file", "default": False},
                 },
                 "required": ["path", "content"],
             },
@@ -240,12 +240,12 @@ class ToolRegistry:
 
         self.register(
             name="list_directory",
-            description="列出目录内容。",
+            description="List directory contents.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "目录路径"},
-                    "pattern": {"type": "string", "description": "文件名过滤模式", "default": "*"},
+                    "path": {"type": "string", "description": "Directory path"},
+                    "pattern": {"type": "string", "description": "File name filter pattern (glob)", "default": "*"},
                 },
                 "required": ["path"],
             },
@@ -255,12 +255,12 @@ class ToolRegistry:
 
         self.register(
             name="run_python",
-            description="执行 Python 代码并返回输出。支持 print() 和表达式求值。",
+            description="Execute Python code and return stdout/evaluated expression.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "Python 代码"},
-                    "timeout": {"type": "number", "description": "超时秒数", "default": 10},
+                    "code": {"type": "string", "description": "Python code"},
+                    "timeout": {"type": "number", "description": "Timeout in seconds", "default": 10},
                 },
                 "required": ["code"],
             },
@@ -270,13 +270,13 @@ class ToolRegistry:
 
         self.register(
             name="run_shell",
-            description="执行 Shell 命令并返回输出。",
+            description="Execute a shell command and return its output.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Shell 命令"},
-                    "cwd": {"type": "string", "description": "工作目录", "default": "."},
-                    "timeout": {"type": "number", "description": "超时秒数", "default": 30},
+                    "command": {"type": "string", "description": "Shell command"},
+                    "cwd": {"type": "string", "description": "Working directory", "default": "."},
+                    "timeout": {"type": "number", "description": "Timeout in seconds", "default": 30},
                 },
                 "required": ["command"],
             },
@@ -286,11 +286,11 @@ class ToolRegistry:
 
         self.register(
             name="json_parse",
-            description="解析 JSON 字符串并返回格式化结果。",
+            description="Parse a JSON string and return formatted result.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "JSON 字符串"},
+                    "text": {"type": "string", "description": "JSON string"},
                 },
                 "required": ["text"],
             },
@@ -298,7 +298,7 @@ class ToolRegistry:
             category="utility",
         )
 
-    # ── 内置 Tool Handlers ──────────────────────────────────────────────────
+    # ── Built-in Tool Handlers ──────────────────────────────────────────────
 
     async def _tool_get_current_time(self, args: dict, ctx: dict) -> str:
         tz_name = args.get("timezone", "local")
@@ -493,5 +493,5 @@ class ToolRegistry:
             return f"JSON parse error: {e}"
 
 
-# ToolCallParser 已移至 tool_call_parser.py
+# ToolCallParser has moved to tool_call_parser.py
 from tool_call_parser import ToolCallParser  # noqa: E402,F401}

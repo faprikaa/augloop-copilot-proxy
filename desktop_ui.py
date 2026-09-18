@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-desktop_ui.py - AugLoop Copilot 桌面端 UI
+desktop_ui.py - AugLoop Copilot Desktop UI
 
-提供完整的桌面端 Web UI，包括:
-  1. 仪表盘 - 系统状态总览
-  2. 聊天 - 流式 AI 对话 (含 Tools 调用可视化)
-  3. Token 管理 - Frida/WAM/HAR 一键获取
-  4. Tools 浏览器 - 查看和执行工具
-  5. 对话历史 - 管理历史对话
+Provides a full desktop Web UI, including:
+  1. Dashboard - System status overview
+  2. Chat - Streaming AI chat (with tool execution visualization)
+  3. Token Management - Auto/Frida/WAM/HAR token acquisition
+  4. Tools Explorer - View and execute tools
+  5. Conversation History - Manage historical conversations
 
-使用方式:
+Usage:
   from desktop_ui import DESKTOP_UI_HTML, launch_desktop
-  # 或直接运行:
+  # Or run directly:
   python desktop_ui.py
 """
 
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 DESKTOP_UI_HTML = r"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -381,16 +381,16 @@ label { font-size:12px; color:var(--muted); display:block; margin-bottom:6px; }
       <div class="card">
         <div class="card-title">Token Acquisition</div>
 
-        <!-- Auto Token (推荐!) -->
+        <!-- Auto Token (Recommended!) -->
         <div class="token-method" id="autoMethod" style="border:2px solid #00d4ff;">
           <div class="tm-header">
-            <span class="tm-title">🔑 Auto Token (推荐! 无需抓包)</span>
+            <span class="tm-title">🔑 Auto Token (Recommended! No packet sniffing needed)</span>
             <span class="tm-status idle" id="autoStatus">Ready</span>
           </div>
-          <div class="tm-desc">自动获取双 Token (JWE + JWT)。优先扫描 Excel 内存，回退到 WebSocket Phase 1。如果 JWE 过期会自动验证并提示。</div>
+          <div class="tm-desc">Automatically acquire dual tokens (JWE + JWT). Scans Excel memory first, falls back to WebSocket Phase 1. If JWE expires, automatically validates and prompts.</div>
           <div class="btn-row">
-            <button class="btn sm" id="autoBtn" onclick="autoAcquireToken()" style="background:#00d4ff;">🔑 一键自动获取</button>
-            <button class="btn sm" id="msalBtn" onclick="msalAcquireToken()" style="background:#7c3aed;">🔐 MSAL 认证</button>
+            <button class="btn sm" id="autoBtn" onclick="autoAcquireToken()" style="background:#00d4ff;">🔑 Auto Acquire</button>
+            <button class="btn sm" id="msalBtn" onclick="msalAcquireToken()" style="background:#7c3aed;">🔐 MSAL Auth</button>
           </div>
           <div class="tm-log" id="autoLog" style="display:none;"></div>
         </div>
@@ -632,99 +632,99 @@ async function doTokenRefresh() {
   }
 }
 
-// ── Auto Token (推荐!) ──
+// ── Auto Token (Recommended!) ──
 async function autoAcquireToken() {
   const btn = document.getElementById('autoBtn');
   const logEl = document.getElementById('autoLog');
   const statusEl = document.getElementById('autoStatus');
-  
+
   btn.disabled = true;
-  btn.textContent = '获取中...';
+  btn.textContent = 'Acquiring...';
   statusEl.textContent = 'Working';
   statusEl.className = 'tm-status running';
   logEl.style.display = 'block';
-  logEl.textContent = '正在获取 Token...\n';
-  
+  logEl.textContent = 'Acquiring Token...\n';
+
   try {
     const d = await api('POST', '/token/auto', {});
-    
+
     if (d.status === 'ok') {
-      logEl.textContent += '[OK] ' + (d.message || '获取成功') + '\n';
+      logEl.textContent += '[OK] ' + (d.message || 'Acquisition successful') + '\n';
       if (d.jwe_validated) {
-        logEl.textContent += '  ✅ JWE Token: 已验证\n';
+        logEl.textContent += '  ✅ JWE Token: Verified\n';
       } else if (d.jwe_validated === false) {
-        logEl.textContent += '  ⚠️ JWE Token: 未验证 (可能已过期)\n';
+        logEl.textContent += '  ⚠️ JWE Token: Unverified (may be expired)\n';
       }
       if (d.auth_token) {
         logEl.textContent += '  ✅ JWT authToken: ' + (d.auth_token_length || '?') + ' chars\n';
       }
       if (d.expires_in_hours) {
-        logEl.textContent += '  有效期: ' + d.expires_in_hours + ' 小时\n';
+        logEl.textContent += '  Validity: ' + d.expires_in_hours + ' hours\n';
       }
       statusEl.textContent = 'Success';
       statusEl.className = 'tm-status success';
-      btn.textContent = '✅ 获取成功';
-      toast(d.message || 'Token 获取成功', 'success');
-      
+      btn.textContent = '✅ Acquired';
+      toast(d.message || 'Token acquired successfully', 'success');
+
       loadTokenStatus();
       loadStatus();
-      
+
       setTimeout(() => {
         btn.disabled = false;
-        btn.textContent = '🔑 一键自动获取';
+        btn.textContent = '🔑 Auto Acquire';
       }, 3000);
     } else if (d.status === 'partial') {
-      logEl.textContent += '[⚠️] ' + (d.message || '部分成功') + '\n';
-      logEl.textContent += '  JWT authToken 已获取，但 JWE 已过期。\n';
-      logEl.textContent += '  请启动 Excel 后重新获取，或点击 "MSAL 认证"。\n';
+      logEl.textContent += '[⚠️] ' + (d.message || 'Partial success') + '\n';
+      logEl.textContent += '  JWT authToken acquired, but JWE is expired.\n';
+      logEl.textContent += '  Please start Excel and reacquire, or click "MSAL Auth".\n';
       statusEl.textContent = 'Partial';
       statusEl.className = 'tm-status error';
-      btn.textContent = '🔑 一键自动获取';
-      toast('JWE Token 已过期，请启动 Excel 或使用 MSAL', 'warn');
+      btn.textContent = '🔑 Auto Acquire';
+      toast('JWE Token expired, please start Excel or use MSAL', 'warn');
     } else {
       logEl.textContent += '[ERROR] ' + (d.error || d.message || 'Unknown error') + '\n';
       statusEl.textContent = 'Failed';
       statusEl.className = 'tm-status error';
-      btn.textContent = '🔑 一键自动获取';
-      toast('自动获取失败: ' + (d.error || ''), 'error');
+      btn.textContent = '🔑 Auto Acquire';
+      toast('Auto acquire failed: ' + (d.error || ''), 'error');
     }
   } catch (e) {
     logEl.textContent += '[ERROR] ' + e + '\n';
     statusEl.textContent = 'Error';
     statusEl.className = 'tm-status error';
-    btn.textContent = '🔑 一键自动获取';
+    btn.textContent = '🔑 Auto Acquire';
     toast('Auto acquire error: ' + e, 'error');
   }
   btn.disabled = false;
 }
 
-// ── MSAL 认证 ──
+// ── MSAL Auth ──
 async function msalAcquireToken() {
   const btn = document.getElementById('msalBtn');
   const logEl = document.getElementById('autoLog');
   const statusEl = document.getElementById('autoStatus');
-  
+
   btn.disabled = true;
-  btn.textContent = '认证中...';
+  btn.textContent = 'Authenticating...';
   statusEl.textContent = 'Working';
   statusEl.className = 'tm-status running';
   logEl.style.display = 'block';
-  logEl.textContent = 'MSAL 认证中...\n';
-  logEl.textContent += '⚠️ 首次使用需要查看服务器终端完成设备认证\n';
-  
+  logEl.textContent = 'MSAL Authenticating...\n';
+  logEl.textContent += '⚠️ For first-time use, check the server terminal to complete device authentication\n';
+
   try {
     const d = await api('POST', '/token/msal', {}, 120000);
-    
+
     if (d.status === 'ok') {
-      logEl.textContent += '[OK] ' + (d.message || 'MSAL 认证成功') + '\n';
+      logEl.textContent += '[OK] ' + (d.message || 'MSAL authentication successful') + '\n';
       if (d.jwe_validated) {
-        logEl.textContent += '  ✅ JWE Token: 已验证\n';
+        logEl.textContent += '  ✅ JWE Token: Verified\n';
       }
       logEl.textContent += '  JWE length: ' + (d.jwe_token_length || '?') + ' chars\n';
       statusEl.textContent = 'Success';
       statusEl.className = 'tm-status success';
-      btn.textContent = '✅ MSAL 成功';
-      toast('MSAL 认证成功!', 'success');
+      btn.textContent = '✅ MSAL Success';
+      toast('MSAL authentication successful!', 'success');
       loadTokenStatus();
       loadStatus();
     } else {
@@ -732,7 +732,7 @@ async function msalAcquireToken() {
       if (d.message) logEl.textContent += '  ' + d.message + '\n';
       statusEl.textContent = 'Failed';
       statusEl.className = 'tm-status error';
-      toast('MSAL 认证失败: ' + (d.error || ''), 'error');
+      toast('MSAL authentication failed: ' + (d.error || ''), 'error');
     }
   } catch (e) {
     logEl.textContent += '[ERROR] ' + e + '\n';
@@ -741,7 +741,7 @@ async function msalAcquireToken() {
     toast('MSAL error: ' + e, 'error');
   }
   btn.disabled = false;
-  btn.textContent = '🔐 MSAL 认证';
+  btn.textContent = '🔐 MSAL Auth';
 }
 
 // ── Frida ──
@@ -1378,10 +1378,10 @@ setInterval(loadStatus, 30000);
 
 
 def launch_desktop(host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True):
-    """启动桌面端 UI
+    """Launch Desktop UI
 
-    1. 在后台启动 FastAPI 服务器
-    2. 打开浏览器访问 UI
+    1. Start FastAPI server in the background
+    2. Open browser to access the UI
     """
     import subprocess
     import sys as _sys
@@ -1390,13 +1390,13 @@ def launch_desktop(host: str = "127.0.0.1", port: int = 8080, open_browser: bool
     url = f"http://{host}:{port}"
 
     if open_browser:
-        # 延迟打开浏览器，等服务器启动
+        # Delay opening browser until server starts
         def _open():
             time.sleep(2)
             webbrowser.open(url)
         threading.Thread(target=_open, daemon=True).start()
 
-    # 启动服务器
+    # Start server
     print(f"[Desktop UI] Starting server at {url}")
     print(f"[Desktop UI] Server directory: {server_dir}")
 

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-conversation_store.py - 对话持久化 (SQLite)
+conversation_store.py - Conversation Persistence (SQLite)
 
-提供 OpenAI 兼容的对话管理:
-  1. 创建/删除/列出对话
-  2. 添加消息 (user/assistant/tool)
-  3. 获取对话历史
-  4. 支持 tool_calls 存储
+Provides OpenAI-compatible conversation management:
+  1. Create / delete / list conversations
+  2. Add messages (user/assistant/system/tool)
+  3. Retrieve conversation history
+  4. Support tool_calls storage
 
-表结构:
+Schema:
   conversations: id, title, created_at, updated_at, model
   messages: id, conversation_id, role, content, tool_calls, tool_call_id, created_at
 
-用法:
+Usage:
     store = ConversationStore("conversations.db")
     conv_id = store.create_conversation("My Chat")
     store.add_message(conv_id, "user", "Hello")
@@ -32,25 +32,22 @@ logger = logging.getLogger("conversations")
 
 
 class ConversationStore:
-    """SQLite 对话存储 (线程安全，持久连接)"""
+    """SQLite conversation store (thread-safe, persistent connection)"""
 
     def __init__(self, db_path: str = "conversations.db"):
         self.db_path = str(db_path)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
         self._init_db()
-        logger.info("ConversationStore initialized: %s", self.db_path)
 
     def _init_db(self):
         with self._lock:
             self._conn.executescript("""
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
-                    title TEXT DEFAULT '',
-                    model TEXT DEFAULT 'copilot',
+                    title TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT 'copilot',
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 );
@@ -59,12 +56,12 @@ class ConversationStore:
                     id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL,
                     role TEXT NOT NULL,
-                    content TEXT DEFAULT '',
-                    tool_calls TEXT DEFAULT NULL,
-                    tool_call_id TEXT DEFAULT NULL,
-                    name TEXT DEFAULT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    tool_calls TEXT,
+                    tool_call_id TEXT,
+                    name TEXT,
                     created_at REAL NOT NULL,
-                    seq INTEGER NOT NULL,
+                    seq INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
                 );
 
@@ -72,14 +69,14 @@ class ConversationStore:
                     ON messages(conversation_id, seq);
             """)
 
-    # ── 对话管理 ────────────────────────────────────────────────────────────
+    # ── Conversation Management ─────────────────────────────────────────────
 
     def create_conversation(
         self,
         title: str = "",
         model: str = "copilot",
     ) -> str:
-        """创建新对话，返回 conversation_id"""
+        """Create a new conversation and return conversation_id"""
         conv_id = f"conv-{uuid.uuid4().hex[:24]}"
         now = time.time()
         with self._lock:
@@ -92,14 +89,14 @@ class ConversationStore:
         return conv_id
 
     def delete_conversation(self, conv_id: str) -> bool:
-        """删除对话及其所有消息"""
+        """Delete conversation and all its messages"""
         with self._lock:
             cur = self._conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
             self._conn.commit()
             return cur.rowcount > 0
 
     def get_conversation(self, conv_id: str) -> dict | None:
-        """获取对话信息"""
+        """Get conversation information"""
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM conversations WHERE id = ?", (conv_id,)
@@ -109,7 +106,7 @@ class ConversationStore:
             return dict(row)
 
     def list_conversations(self, limit: int = 50, offset: int = 0) -> list[dict]:
-        """列出对话"""
+        """List conversations"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT c.*, (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) as message_count "
@@ -119,7 +116,7 @@ class ConversationStore:
             return [dict(r) for r in rows]
 
     def update_conversation_title(self, conv_id: str, title: str):
-        """更新对话标题"""
+        """Update conversation title"""
         with self._lock:
             self._conn.execute(
                 "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
@@ -128,7 +125,7 @@ class ConversationStore:
             self._conn.commit()
 
     def touch_conversation(self, conv_id: str):
-        """更新对话的 updated_at"""
+        """Update conversation updated_at timestamp"""
         with self._lock:
             self._conn.execute(
                 "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -136,7 +133,7 @@ class ConversationStore:
             )
             self._conn.commit()
 
-    # ── 消息管理 ────────────────────────────────────────────────────────────
+    # ── Message Management ──────────────────────────────────────────────────
 
     def add_message(
         self,
@@ -148,15 +145,15 @@ class ConversationStore:
         name: str | None = None,
     ) -> str:
         """
-        添加消息到对话
+        Add a message to the conversation
 
         Args:
-            conv_id: 对话 ID
+            conv_id: Conversation ID
             role: user / assistant / system / tool
-            content: 消息内容
-            tool_calls: AI 请求的工具调用列表 (OpenAI 格式)
-            tool_call_id: 工具响应对应的调用 ID
-            name: 工具名称 (role=tool 时)
+            content: Message content
+            tool_calls: Tool call list requested by AI (OpenAI format)
+            tool_call_id: Tool response ID corresponding to call
+            name: Tool name (when role=tool)
 
         Returns:
             message_id
@@ -164,7 +161,7 @@ class ConversationStore:
         msg_id = f"msg-{uuid.uuid4().hex[:24]}"
         now = time.time()
 
-        # 获取下一个 seq
+        # Get next seq
         with self._lock:
             row = self._conn.execute(
                 "SELECT MAX(seq) as max_seq FROM messages WHERE conversation_id = ?",
@@ -188,7 +185,7 @@ class ConversationStore:
                     seq,
                 ),
             )
-            # 更新对话时间
+            # Update conversation updated timestamp
             self._conn.execute(
                 "UPDATE conversations SET updated_at = ? WHERE id = ?",
                 (now, conv_id),
@@ -198,7 +195,7 @@ class ConversationStore:
         return msg_id
 
     def get_messages(self, conv_id: str) -> list[dict]:
-        """获取对话的所有消息 (OpenAI 格式)"""
+        """Get all messages in conversation (OpenAI format)"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM messages WHERE conversation_id = ? ORDER BY seq ASC",
@@ -222,7 +219,7 @@ class ConversationStore:
         return messages
 
     def get_message_count(self, conv_id: str) -> int:
-        """获取对话消息数"""
+        """Get count of messages in conversation"""
         with self._lock:
             row = self._conn.execute(
                 "SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ?",
@@ -231,7 +228,7 @@ class ConversationStore:
             return row["cnt"]
 
     def clear_messages(self, conv_id: str):
-        """清空对话消息 (保留对话)"""
+        """Clear conversation messages (retains conversation metadata)"""
         with self._lock:
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
             self._conn.execute(
@@ -240,10 +237,10 @@ class ConversationStore:
             )
             self._conn.commit()
 
-    # ── 便利方法 ────────────────────────────────────────────────────────────
+    # ── Convenience Methods ─────────────────────────────────────────────────
 
     def get_or_create_conversation(self, conv_id: str | None = None, model: str = "copilot") -> str:
-        """获取或创建对话"""
+        """Get or create conversation"""
         if conv_id:
             conv = self.get_conversation(conv_id)
             if conv:
@@ -251,11 +248,11 @@ class ConversationStore:
         return self.create_conversation(model=model)
 
     def to_openai_messages(self, conv_id: str) -> list[dict]:
-        """获取 OpenAI API 格式的消息列表"""
+        """Get list of messages in OpenAI API format"""
         return self.get_messages(conv_id)
 
     def search_conversations(self, query: str, limit: int = 20) -> list[dict]:
-        """搜索对话标题和消息内容"""
+        """Search conversation titles and message contents"""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT DISTINCT c.* FROM conversations c
@@ -267,6 +264,6 @@ class ConversationStore:
             return [dict(r) for r in rows]
 
     def close(self):
-        """关闭数据库连接"""
+        """Close database connection"""
         with self._lock:
             self._conn.close()
