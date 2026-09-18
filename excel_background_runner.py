@@ -208,9 +208,23 @@ class ExcelBackgroundRunner:
 
         # 🔑 Always Dispatch new instance; never use GetActiveObject
         logger.info("Launching fresh Excel instance (Dispatch)...")
-        self._excel = win32com.client.Dispatch("Excel.Application")
-        self._excel.Visible = True       # Visible initially for user to open Copilot
-        self._excel.DisplayAlerts = False
+        # DispatchEx forces a separate process; plain Dispatch may attach to a running Excel
+        try:
+            self._excel = win32com.client.gencache.EnsureDispatchEx("Excel.Application")
+        except Exception:
+            self._excel = win32com.client.DispatchEx("Excel.Application")
+
+        # Excel may still be starting up; retry property sets that fail transiently
+        for attempt in range(10):
+            try:
+                self._excel.Visible = True   # Visible initially for user to open Copilot
+                self._excel.DisplayAlerts = False
+                break
+            except Exception as e:
+                if attempt == 9:
+                    raise
+                logger.info("Excel not ready yet (%s), retrying...", e)
+                time.sleep(1)
         try:
             self._excel.Workbooks.Add()
         except Exception:
