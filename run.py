@@ -44,7 +44,7 @@ def _load_server_config():
     Returns (host, port) with sensible fallbacks. Used so the bind address can
     be controlled from config.yaml without passing CLI flags every time.
     """
-    host, port = "127.0.0.1", 8080
+    host, port = "0.0.0.0", 8080
     try:
         import yaml
         cfg_path = SCRIPT_DIR / "config.yaml"
@@ -74,7 +74,7 @@ def main():
     parser.add_argument("--port", type=int, default=None,
                         help="Proxy server port (default: from config.yaml, else 8080)")
     parser.add_argument("--host", default=None,
-                        help="Proxy server host (default: from config.yaml, else 127.0.0.1). "
+                        help="Proxy server host (default: from config.yaml, else 0.0.0.0). "
                              "Use 0.0.0.0 to allow access from WSL/LAN")
     args = parser.parse_args()
 

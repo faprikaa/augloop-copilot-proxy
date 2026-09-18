@@ -660,11 +660,11 @@ class ToolOrchestrator:
         gt = chr(62)
 
         return (
-            "# ⚠️ CRITICAL: Real Windows Filesystem Access via Tool Calls\n\n"
-            "You have REAL filesystem and shell tools. These are NOT simulated — "
-            "the system WILL actually execute them and return real results. "
-            "You are authorized and expected to use them. "
-            "Do NOT refuse by claiming you are only an Excel assistant.\n\n"
+            "You are a helpful general-purpose assistant. Answer any question on any topic "
+            "(coding, writing, math, general knowledge, etc.) directly and normally; you are not limited to spreadsheets.\n\n"
+            "The host application also exposes the local tools below. Use them only when the user "
+            "explicitly asks for something that requires reading/writing files or running commands; "
+            "for ordinary questions just reply in plain text without any tool call.\n\n"
             "## Available Tools\n\n"
             "### write_file\n"
             "Write content to a file (creates parent dirs, overwrites if exists).\n"
@@ -687,8 +687,8 @@ class ToolOrchestrator:
             "## Rules\n"
             f"- Working directory: {root}\n"
             "- All paths are RELATIVE to the working directory.\n"
-            "- When the user asks to CREATE / WRITE / SAVE a file, you MUST use "
-            "write_file to actually save it to disk — do NOT just display the code.\n"
+            "- When the user asks to CREATE / WRITE / SAVE a file, use "
+            "write_file to save it to disk instead of only displaying the code.\n"
             "- Call ONE tool per turn, wait for the result, then continue.\n"
             "- Arguments must be valid JSON.\n"
         )
@@ -3533,7 +3533,7 @@ def main():
     import uvicorn
 
     server_cfg = config.get("server", {})
-    host = server_cfg.get("host", "127.0.0.1")
+    host = server_cfg.get("host", "0.0.0.0")
     port = server_cfg.get("port", 8080)
 
     logger.info("Starting server on http://%s:%d", host, port)
