@@ -5,7 +5,7 @@
 server:
   host: 127.0.0.1
   port: 8080
-  api_key: ''             # Leave empty for no authentication; if set, all requests require Authorization: Bearer <key>
+  api_key: 'dummy'          # Default API key is 'dummy'; set any custom value, or leave as 'dummy' for easy access
 
 augloop:
   base_url: https://augloop.svc.cloud.microsoft

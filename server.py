@@ -1,8 +1,10 @@
 """
-server.py - OpenAI-Compatible AugLoop Copilot Reverse Proxy Server (v2)
+server.py - OpenAI & Anthropic Compatible AugLoop Copilot Reverse Proxy Server (v2)
 
 Full API Endpoints:
   POST /v1/chat/completions        — OpenAI-compatible AI chat (with tools/function calling)
+  POST /v1/messages                — Anthropic Messages API compatible AI chat
+  POST /v1/responses               — OpenAI Responses API
   GET  /v1/models                  — Model list
   GET  /v1/tools                   — List available Tools
   POST /v1/tools/:name/execute     — Execute Tool directly
@@ -83,6 +85,21 @@ def save_config(cfg: dict):
 
 config = load_config()
 
+# ── API Key Setup ─────────────────────────────────────────────────────────────
+# Ensure server.api_key always has a value; default to "dummy" if not configured
+_server_cfg = config.setdefault("server", {})
+if not _server_cfg.get("api_key"):
+    _server_cfg["api_key"] = "dummy"
+
+
+def _mask_api_key(key: str) -> str:
+    """Mask API key for display: show first 4 and last 4 chars"""
+    if not key:
+        return "(none)"
+    if len(key) <= 8:
+        return key[:2] + "*" * (len(key) - 2)
+    return key[:4] + "*" * (len(key) - 8) + key[-4:]
+
 # ── Core Component Initialization ─────────────────────────────────────────────
 
 token_manager = TokenManager(config)
@@ -109,7 +126,7 @@ conversation_store = ConversationStore(str(DB_PATH))
 
 app = FastAPI(
     title="AugLoop Copilot Proxy",
-    description="OpenAI-compatible Microsoft 365 Copilot (AugLoop) reverse proxy - supports Tools & conversation management",
+    description="OpenAI & Anthropic compatible Microsoft 365 Copilot (AugLoop) reverse proxy - supports Tools & conversation management",
     version="2.0.0",
 )
 
@@ -128,6 +145,30 @@ def check_api_key(request: Request):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
+def _check_anthropic_api_key(request: Request):
+    """Validate API key for Anthropic endpoints.
+
+    Accepts both:
+    - x-api-key: <key>  (Anthropic native style)
+    - Authorization: Bearer <key>  (OpenAI style)
+    """
+    api_key = config.get("server", {}).get("api_key", "")
+    if not api_key:
+        return
+    # Try x-api-key first (Anthropic style)
+    provided = request.headers.get("x-api-key", "")
+    if not provided:
+        # Fallback to Authorization: Bearer (OpenAI style)
+        provided = request.headers.get("Authorization", "")
+        if provided.startswith("Bearer "):
+            provided = provided[7:]
+    if provided != api_key:
+        raise HTTPException(status_code=401, detail={
+            "type": "authentication_error",
+            "message": "Invalid API key",
+        })
+
+
 # ── Pydantic Models ───────────────────────────────────────────────────────────
 
 
@@ -137,6 +178,34 @@ class ChatMessage(BaseModel):
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+
+
+# ── Anthropic Messages API Models ─────────────────────────────────────────────
+
+
+class AnthropicMessage(BaseModel):
+    role: str
+    content: str | list[dict]
+
+
+class AnthropicMessagesRequest(BaseModel):
+    """Anthropic Messages API request model
+
+    POST /v1/messages
+    https://docs.anthropic.com/en/api/messages
+    """
+    model: str = "copilot"
+    messages: list[AnthropicMessage]
+    max_tokens: int = 4096
+    system: str | list[dict] | None = None
+    stream: bool = False
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    stop_sequences: list[str] | None = None
+    metadata: dict | None = None
+
+    model_config = {"extra": "allow"}
 
 
 class ToolSchema(BaseModel):
@@ -2055,6 +2124,386 @@ async def retrieve_response(response_id: str, request: Request):
     )
 
 
+# ── Route: Anthropic Messages API ─────────────────────────────────────────────
+
+
+def _parse_anthropic_content(content) -> str:
+    """Parse Anthropic content field (str or list of content blocks) into plain text"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "image":
+                    parts.append("[image]")
+                else:
+                    parts.append(block.get("text", str(block)))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(content) if content else ""
+
+
+def _parse_anthropic_system(system) -> str:
+    """Parse Anthropic system field (str or list of system blocks) into plain text"""
+    if not system:
+        return ""
+    if isinstance(system, str):
+        return system
+    if isinstance(system, list):
+        parts = []
+        for block in system:
+            if isinstance(block, dict):
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(system)
+
+
+def _build_anthropic_response(
+    msg_id: str,
+    model: str,
+    content_text: str,
+    stop_reason: str = "end_turn",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+) -> dict:
+    """Build Anthropic Messages API non-streaming response"""
+    return {
+        "id": msg_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [
+            {
+                "type": "text",
+                "text": content_text,
+            }
+        ],
+        "model": model,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+    }
+
+
+async def _stream_anthropic_sse(
+    msg_id: str,
+    model: str,
+    generator,
+    conv_id: str,
+    input_tokens: int = 0,
+    stop_sequences: list[str] | None = None,
+    max_tokens: int = 4096,
+) -> AsyncGenerator[str, None]:
+    """Anthropic Messages API SSE streaming response
+
+    Event sequence:
+    1. message_start
+    2. content_block_start (index=0, type=text)
+    3. content_block_delta (text_delta) — multiple
+    4. content_block_stop (index=0)
+    5. message_delta (stop_reason, usage)
+    6. message_stop
+    """
+    full_text = ""
+    truncated = False
+    effective_max_chars = max_tokens * 4 if max_tokens > 0 else None
+    stop_seqs = stop_sequences or []
+
+    # 1. message_start
+    msg_start = {
+        "type": "message_start",
+        "message": {
+            "id": msg_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "model": model,
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": 0,
+            },
+        },
+    }
+    yield f"event: message_start\ndata: {json.dumps(msg_start, ensure_ascii=False)}\n\n"
+
+    # 2. content_block_start
+    block_start = {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {
+            "type": "text",
+            "text": "",
+        },
+    }
+    yield f"event: content_block_start\ndata: {json.dumps(block_start, ensure_ascii=False)}\n\n"
+
+    # 3. content_block_delta — streaming text
+    # Also emit ping events periodically
+    try:
+        async for text in generator:
+            # Check stop sequences
+            if stop_seqs:
+                combined = full_text + text
+                for s in stop_seqs:
+                    if s and s in combined:
+                        idx = combined.index(s)
+                        remaining = combined[len(full_text):idx]
+                        if remaining:
+                            full_text += remaining
+                            delta = {
+                                "type": "content_block_delta",
+                                "index": 0,
+                                "delta": {"type": "text_delta", "text": remaining},
+                            }
+                            yield f"event: content_block_delta\ndata: {json.dumps(delta, ensure_ascii=False)}\n\n"
+                        truncated = True
+                        break
+                if truncated:
+                    break
+
+            # Check max_tokens truncation
+            if effective_max_chars and len(full_text) + len(text) > effective_max_chars:
+                remaining_chars = effective_max_chars - len(full_text)
+                if remaining_chars > 0:
+                    text = text[:remaining_chars]
+                    full_text += text
+                    delta = {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {"type": "text_delta", "text": text},
+                    }
+                    yield f"event: content_block_delta\ndata: {json.dumps(delta, ensure_ascii=False)}\n\n"
+                truncated = True
+                break
+
+            full_text += text
+            delta = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": text},
+            }
+            yield f"event: content_block_delta\ndata: {json.dumps(delta, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        logger.error("Anthropic stream error: %s", e)
+        error_delta = {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": f"\n[Error: {e}]"},
+        }
+        yield f"event: content_block_delta\ndata: {json.dumps(error_delta, ensure_ascii=False)}\n\n"
+
+    # Save to conversation
+    if full_text:
+        conversation_store.add_message(conv_id, "assistant", full_text)
+
+    # 4. content_block_stop
+    block_stop = {"type": "content_block_stop", "index": 0}
+    yield f"event: content_block_stop\ndata: {json.dumps(block_stop, ensure_ascii=False)}\n\n"
+
+    # 5. message_delta
+    output_tokens = _estimate_tokens(full_text)
+    stop_reason = "max_tokens" if truncated else "end_turn"
+    msg_delta = {
+        "type": "message_delta",
+        "delta": {
+            "stop_reason": stop_reason,
+            "stop_sequence": None,
+        },
+        "usage": {
+            "output_tokens": output_tokens,
+        },
+    }
+    yield f"event: message_delta\ndata: {json.dumps(msg_delta, ensure_ascii=False)}\n\n"
+
+    # 6. message_stop
+    msg_stop = {"type": "message_stop"}
+    yield f"event: message_stop\ndata: {json.dumps(msg_stop, ensure_ascii=False)}\n\n"
+
+
+@app.post("/v1/messages")
+async def anthropic_messages(req: AnthropicMessagesRequest, request: Request):
+    """Anthropic Messages API: POST /v1/messages
+
+    Fully compatible with Anthropic Messages API protocol.
+    Supports both non-streaming and streaming (SSE) modes.
+
+    Authentication:
+    - Accepts both `Authorization: Bearer <key>` (OpenAI style)
+      and `x-api-key: <key>` (Anthropic style)
+
+    Request format:
+        {
+            "model": "claude-sonnet-5",
+            "max_tokens": 1024,
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": false
+        }
+
+    Response format (non-streaming):
+        {
+            "id": "msg_...",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "..."}],
+            "model": "claude-sonnet-5",
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": ..., "output_tokens": ...}
+        }
+
+    Streaming format (SSE):
+        event: message_start
+        data: {"type": "message_start", "message": {...}}
+
+        event: content_block_start
+        data: {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}
+
+        event: content_block_delta
+        data: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "..."}}
+
+        event: content_block_stop
+        data: {"type": "content_block_stop", "index": 0}
+
+        event: message_delta
+        data: {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": ...}}
+
+        event: message_stop
+        data: {"type": "message_stop"}
+    """
+    # Anthropic uses x-api-key header OR Authorization: Bearer
+    _check_anthropic_api_key(request)
+
+    try:
+        # Parse system prompt
+        system_prompt = _parse_anthropic_system(req.system)
+
+        # Parse messages: extract last user message and history
+        user_message = ""
+        history: list[dict] = []
+
+        for i, msg in enumerate(req.messages):
+            content_text = _parse_anthropic_content(msg.content)
+            if msg.role == "user":
+                if i < len(req.messages) - 1:
+                    history.append({"role": "user", "content": content_text})
+                else:
+                    user_message = content_text
+            elif msg.role == "assistant":
+                history.append({"role": "assistant", "content": content_text})
+
+        if not user_message:
+            raise HTTPException(status_code=400, detail={
+                "type": "invalid_request_error",
+                "message": "No user message found in messages",
+            })
+
+        logger.info("Anthropic Messages API: input=%s (stream=%s, max_tokens=%s, model=%s)",
+                    user_message[:50], req.stream, req.max_tokens, req.model)
+
+        # Conversation management
+        conv_id = conversation_store.create_conversation(model=req.model)
+        conversation_store.add_message(conv_id, "user", user_message)
+
+        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+
+        # Orchestrator call
+        result = await orchestrator.chat_with_tools(
+            message=user_message,
+            history=history if history else None,
+            tools=None,
+            use_stream=req.stream,
+            max_iterations=1,
+            model=req.model,
+            temperature=req.temperature,
+            top_p=req.top_p,
+            system_prompt=system_prompt,
+        )
+
+        if "error" in result:
+            conversation_store.add_message(conv_id, "assistant", f"[Error] {result['error']}")
+            raise HTTPException(status_code=502, detail={
+                "type": "api_error",
+                "message": result["error"],
+            })
+
+        # Streaming response
+        if result.get("stream"):
+            return StreamingResponse(
+                _stream_anthropic_sse(
+                    msg_id=msg_id,
+                    model=req.model,
+                    generator=result["generator"],
+                    conv_id=conv_id,
+                    input_tokens=_estimate_tokens(user_message + system_prompt),
+                    stop_sequences=req.stop_sequences,
+                    max_tokens=req.max_tokens,
+                ),
+                media_type="text/event-stream",
+            )
+
+        response_text = result.get("response_text", "")
+
+        # Apply stop sequences
+        stop_reason = "end_turn"
+        if req.stop_sequences:
+            response_text, stopped = _apply_stop_sequences(response_text, req.stop_sequences)
+            if stopped:
+                stop_reason = "stop_sequence"
+
+        # Apply max_tokens
+        response_text = _truncate_tokens(response_text, req.max_tokens)
+        if len(response_text) >= (req.max_tokens * 4 if req.max_tokens else float('inf')):
+            stop_reason = "max_tokens"
+
+        # Save to conversation
+        conversation_store.add_message(conv_id, "assistant", response_text)
+
+        # Wrap streaming result that came back non-streaming
+        if req.stream and response_text:
+            async def _wrap_text_stream(text: str):
+                yield text
+            return StreamingResponse(
+                _stream_anthropic_sse(
+                    msg_id=msg_id,
+                    model=req.model,
+                    generator=_wrap_text_stream(response_text),
+                    conv_id=conv_id,
+                    input_tokens=_estimate_tokens(user_message + system_prompt),
+                    stop_sequences=req.stop_sequences,
+                    max_tokens=req.max_tokens,
+                ),
+                media_type="text/event-stream",
+            )
+
+        return _build_anthropic_response(
+            msg_id=msg_id,
+            model=req.model,
+            content_text=response_text,
+            stop_reason=stop_reason,
+            input_tokens=_estimate_tokens(user_message + system_prompt),
+            output_tokens=_estimate_tokens(response_text),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Anthropic Messages API internal error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail={
+            "type": "api_error",
+            "message": f"Internal error: {e}",
+        })
+
+
 # ── Route: Tools ──────────────────────────────────────────────────────────────
 
 
@@ -2185,10 +2634,18 @@ async def status():
         "token_source": token_manager.source,
         "token_expired": token_manager.is_expired,
         "token_expires_in": token_manager.expires_in,
+        "api_key": config.get("server", {}).get("api_key", ""),
+        "api_key_masked": _mask_api_key(config.get("server", {}).get("api_key", "")),
         "session_id": augloop.session_id,
         "health_check": hc_status,
         "tools_count": len(tool_registry.list_enabled()),
         "conversations_count": len(conversation_store.list_conversations(limit=1)),
+        "endpoints": {
+            "openai": "/v1/chat/completions",
+            "anthropic": "/v1/messages",
+            "responses": "/v1/responses",
+            "models": "/v1/models",
+        },
         "config_file": str(CONFIG_PATH),
     }
 
@@ -3043,13 +3500,16 @@ loadStatus();
 @app.on_event("startup")
 async def startup():
     """Initialize on startup"""
+    _api_key = config.get("server", {}).get("api_key", "")
     logger.info("=" * 60)
     logger.info("AugLoop Copilot Proxy v2.0.0")
     logger.info("  Token: %s", "[OK] configured" if token_manager.has_token else "[X] not set")
     logger.info("  Token source: %s", token_manager.source)
     logger.info("  Token expires in: %ds", token_manager.expires_in)
+    logger.info("  API Key: %s", _api_key if _api_key else "(none - no auth)")
     logger.info("  Tools: %d registered", len(tool_registry.list_enabled()))
     logger.info("  Conversations DB: %s", DB_PATH)
+    logger.info("  Endpoints: /v1/chat/completions (OpenAI), /v1/messages (Anthropic), /v1/responses (Responses API)")
     logger.info("=" * 60)
 
     # Start Token auto-refresh (interval read from config, default 120s)
