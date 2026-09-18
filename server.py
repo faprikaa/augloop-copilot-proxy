@@ -131,6 +131,25 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def _normalize_v1_prefix(request: Request, call_next):
+    """Accept clients whose base URL already ends in /v1 (e.g. Claude Code
+    with ANTHROPIC_BASE_URL=http://host:8080/v1 sends /v1/v1/messages)."""
+    path = request.scope["path"]
+    while path.startswith("/v1/v1/"):
+        path = path[3:]
+    if path != request.scope["path"]:
+        request.scope["path"] = path
+        request.scope["raw_path"] = path.encode()
+    return await call_next(request)
+
+
+@app.api_route("/v1/api/hello", methods=["GET", "HEAD"])
+async def _connectivity_probe():
+    """Claude Code sends HEAD <base>/api/hello as a connectivity check."""
+    return {"ok": True}
+
+
 # ── API Key Validation ────────────────────────────────────────────────────────
 
 
