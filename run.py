@@ -38,6 +38,27 @@ logging.basicConfig(
 logger = logging.getLogger("run")
 
 
+def _load_server_config():
+    """Read server.host / server.port from config.yaml (best-effort).
+
+    Returns (host, port) with sensible fallbacks. Used so the bind address can
+    be controlled from config.yaml without passing CLI flags every time.
+    """
+    host, port = "127.0.0.1", 8080
+    try:
+        import yaml
+        cfg_path = SCRIPT_DIR / "config.yaml"
+        if cfg_path.exists():
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+            srv = cfg.get("server", {}) or {}
+            host = srv.get("host") or host
+            port = int(srv.get("port") or port)
+    except Exception as e:
+        logger.warning("Could not read server config (%s); using defaults", e)
+    return host, port
+
+
 def main():
     parser = argparse.ArgumentParser(description="Excel Background Token Harvester + Proxy Server")
     parser.add_argument("--mode", choices=["hide", "minimize", "offscreen"],
@@ -50,11 +71,19 @@ def main():
                         help="Automatically open Copilot and send message to initialize (no user interaction)")
     parser.add_argument("--no-validate", action="store_true",
                         help="Skip Token validation")
-    parser.add_argument("--port", type=int, default=8080,
-                        help="Proxy server port (default: 8080)")
-    parser.add_argument("--host", default="127.0.0.1",
-                        help="Proxy server host address (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=None,
+                        help="Proxy server port (default: from config.yaml, else 8080)")
+    parser.add_argument("--host", default=None,
+                        help="Proxy server host (default: from config.yaml, else 127.0.0.1). "
+                             "Use 0.0.0.0 to allow access from WSL/LAN")
     args = parser.parse_args()
+
+    # Resolve host/port: CLI flag > config.yaml > hardcoded default
+    _cfg_host, _cfg_port = _load_server_config()
+    if args.host is None:
+        args.host = _cfg_host
+    if args.port is None:
+        args.port = _cfg_port
 
     print()
     print("=" * 60)

@@ -86,10 +86,10 @@ def save_config(cfg: dict):
 config = load_config()
 
 # ── API Key Setup ─────────────────────────────────────────────────────────────
-# Ensure server.api_key always has a value; default to "dummy" if not configured
+# API key is OPTIONAL. If server.api_key is empty or missing in config.yaml,
+# authentication is disabled entirely (open access). Set a value to require it.
 _server_cfg = config.setdefault("server", {})
-if not _server_cfg.get("api_key"):
-    _server_cfg["api_key"] = "dummy"
+_server_cfg.setdefault("api_key", "")
 
 
 def _mask_api_key(key: str) -> str:

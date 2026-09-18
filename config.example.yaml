@@ -3,9 +3,9 @@
 # Most fields will be automatically populated on first run
 
 server:
-  host: 127.0.0.1
+  host: 0.0.0.0             # 0.0.0.0 = reachable from WSL/LAN; use 127.0.0.1 for local-only
   port: 8080
-  api_key: 'dummy'          # Default API key is 'dummy'; set any custom value, or leave as 'dummy' for easy access
+  api_key: ''               # Optional. Leave empty to disable auth (open access); set any value to require it
 
 augloop:
   base_url: https://augloop.svc.cloud.microsoft
