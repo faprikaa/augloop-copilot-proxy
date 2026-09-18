@@ -152,7 +152,14 @@ cp config.example.yaml config.yaml
 ### 3. Install Dependencies
 
 ```bash
+# Using pip
 pip install -r requirements.txt
+
+# Using uv (faster)
+uv pip install -r requirements.txt
+# Or with a virtual environment:
+uv venv
+uv pip install -r requirements.txt
 ```
 
 ### 4. Start the Proxy
@@ -696,17 +703,26 @@ A: Dialogue history persists in `conversations.db` (SQLite) and can be retrieved
 copilot_proxy/
 ├── README.md                   ← English documentation (this file)
 ├── README_zh.md                ← Chinese documentation
+├── DEPLOY_LINUX.md             ← Linux server deployment guide
 ├── TEST_REPORT_2026-08-03.md   ← Test report (English)
 ├── TEST_REPORT_2026-08-03_zh.md← Test report (Chinese)
 ├── LICENSE                     ← MIT License
 ├── .gitignore                  ← Git ignore rules (sensitive file exclusions)
 ├── config.example.yaml         ← Template configuration
 ├── config.yaml                 ← Active configuration (git-ignored, auto-generated)
-├── requirements.txt            ← Python dependencies
-├── start.bat                   ← Windows one-click start script
-├── run.py                      ← One-click launcher (Excel background + periodic refresh)
-├── server.py                   ← FastAPI server (OpenAI-compatible endpoints)
+├── requirements.txt            ← Python dependencies (Windows)
+├── requirements-linux.txt      ← Python dependencies (Linux, no Windows libs)
 │
+├── start.bat                   ← Windows one-click start script
+├── run.py                      ← Windows launcher (Excel background + periodic refresh)
+├── export_token.py             ← Export tokens to JSON for Linux deployment
+│
+├── start.sh                    ← Linux one-click start script
+├── run_server.py               ← Linux headless server launcher
+├── import_token.py             ← Import tokens from JSON bundle on Linux
+├── sync_token.py               ← HTTP push tokens to remote server (optional)
+│
+├── server.py                   ← FastAPI server (OpenAI-compatible endpoints)
 ├── augloop_ws_client.py        ← AugLoop WebSocket client (core protocol engine)
 ├── augloop_client.py           ← AugLoop HTTP API client
 ├── token_manager.py            ← Unified Token Manager (5 strategies + preemptive refresh)
@@ -739,13 +755,36 @@ The following files are excluded via `.gitignore` and **must never be committed*
 
 ---
 
+## Linux Server Deployment
+
+The proxy can run on a Linux server as a headless service. Token harvesting still requires a Windows machine with Excel, but the actual proxy server runs on Linux.
+
+See **[DEPLOY_LINUX.md](DEPLOY_LINUX.md)** for full instructions.
+
+### Quick Overview
+
+```bash
+# Linux server
+pip install -r requirements-linux.txt   # or: uv pip install -r requirements-linux.txt
+python3 run_server.py --host 0.0.0.0 --port 8080
+
+# Windows (export tokens)
+python export_token.py                  # creates token_bundle.json
+
+# Upload token_bundle.json to Linux server, then:
+python3 import_token.py token_bundle.json
+```
+
+---
+
 ## Unsupported Features
 
 ### Platform Restrictions
 
 | Unsupported | Reason |
 |-------------|--------|
-| ❌ Linux / macOS | Memory scanning uses Win32 APIs (`ctypes` + `OpenProcess`/`ReadProcessMemory`) |
+| ❌ Linux / macOS (token harvesting) | Memory scanning uses Win32 APIs; token must be exported from Windows |
+| ✅ Linux (server only) | Proxy server runs on Linux with tokens uploaded from Windows — see [DEPLOY_LINUX.md](DEPLOY_LINUX.md) |
 | ❌ Headless Mode | Excel requires a desktop GUI session; COM Dispatch fails in session 0 |
 | ❌ Docker Containers | Windows containers lack COM automation and desktop process memory access |
 | ❌ Remote Excel | Memory scanning is restricted to the local host |

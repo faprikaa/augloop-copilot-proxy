@@ -1,0 +1,18 @@
+# AugLoop Copilot Proxy - Linux/Headless Server Dependencies
+# Python 3.10+ required
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# HTTP / WebSocket clients
+httpx>=0.25.0
+aiohttp>=3.9.0
+websockets>=12.0
+
+# Config & data
+pyyaml>=6.0
+pydantic>=2.0.0
+
+# Note: pywin32 and msal[broker] are NOT needed on Linux
+# Token acquisition is handled by the Windows machine via sync_token.py

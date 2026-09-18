@@ -2630,6 +2630,89 @@ async def auto_acquire_token(request: Request):
         return {"status": "error", "error": str(e)}
 
 
+# ── Route: Token Sync (for Linux/headless deployment) ─────────────────────────
+
+
+@app.post("/token/sync")
+async def token_sync(request: Request):
+    """
+    Receive tokens pushed from a Windows machine for Linux/headless deployment.
+
+    Expects JSON body:
+    {
+        "bearer_token": "eyJhbGci...",    // JWE Token (required)
+        "auth_token": "eyJhbGci...",      // JWT Token (optional)
+        "x_client_metadata": "...",        // Client metadata (optional)
+        "x_office_session_id": "...",      // Session ID (optional)
+        "sync_key": "SECRET"               // Sync auth key (if TOKEN_SYNC_KEY is set)
+    }
+    """
+    # Auth check: if TOKEN_SYNC_KEY is set, require it
+    sync_key = os.environ.get("TOKEN_SYNC_KEY", "")
+    if sync_key:
+        body = await request.json()
+        if body.get("sync_key") != sync_key:
+            # Also check api_key from config as fallback
+            check_api_key(request)
+    else:
+        # If no sync key, fall back to normal API key check (if configured)
+        api_key = config.get("server", {}).get("api_key", "")
+        if api_key:
+            check_api_key(request)
+
+    try:
+        body = await request.json()
+
+        jwe_token = body.get("bearer_token", "")
+        auth_token_val = body.get("auth_token", "")
+        x_client_metadata = body.get("x_client_metadata", "")
+        x_office_session_id = body.get("x_office_session_id", "")
+
+        if not jwe_token or len(jwe_token) < 20:
+            return {"status": "error", "error": "bearer_token is required (JWE Token)"}
+
+        updated = []
+
+        # Save JWE Token
+        config.setdefault("augloop", {})["bearer_token"] = jwe_token
+        token_file = Path(__file__).parent / ".augloop_token"
+        token_file.write_text(jwe_token, encoding="utf-8")
+        token_manager.set_token(jwe_token, source="sync")
+        augloop.update_token(jwe_token)
+        ws_client.update_token(jwe_token, auth_token_val or ws_client.auth_token)
+        updated.append(f"bearer_token ({len(jwe_token)} chars)")
+        logger.info("[TokenSync] JWE Bearer Token updated (%d chars)", len(jwe_token))
+
+        # Save JWT authToken
+        if auth_token_val:
+            config["augloop"]["auth_token"] = auth_token_val
+            updated.append(f"auth_token ({len(auth_token_val)} chars)")
+            logger.info("[TokenSync] JWT authToken updated (%d chars)", len(auth_token_val))
+
+        # Save metadata
+        if x_client_metadata:
+            config["augloop"]["x_client_metadata"] = x_client_metadata
+            augloop.x_client_metadata = x_client_metadata
+            updated.append("x_client_metadata")
+
+        if x_office_session_id:
+            config["augloop"]["x_office_session_id"] = x_office_session_id
+            augloop.session_id = x_office_session_id
+            updated.append("x_office_session_id")
+
+        save_config(config)
+
+        return {
+            "status": "ok",
+            "updated": updated,
+            "message": f"Token sync successful: {', '.join(updated)}",
+        }
+
+    except Exception as e:
+        logger.error("[TokenSync] Error: %s", e, exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
 # ── Desktop UI ──────────────────────────────────────────────────────────────
 
 
