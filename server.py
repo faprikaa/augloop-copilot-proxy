@@ -256,8 +256,6 @@ class ResponseInputItem(BaseModel):
     # For function_call_output
     call_id: str | None = None
     output: str | None = None
-    # Generic extra fields
-    model_extra: dict = {}
 
     model_config = {"extra": "allow"}
 
