@@ -85,26 +85,33 @@ def main():
     scan_stop = threading.Event()
 
     def bg_scan_loop():
-        """Background scan loop: force refreshes every interval seconds (trigger Excel + scan + validate)"""
+        """Background scan loop: force refreshes every interval seconds (trigger Excel + scan + validate)
+
+        First scan happens immediately (acts as the initial Token load).
+        Subsequent scans wait for the configured interval.
+        """
+        first_run = True
         while not scan_stop.is_set():
             try:
-                # 🔑 Force refresh: trigger Excel Copilot to generate fresh Token
-                logger.info("[Force Refresh] Triggering Excel Copilot to refresh Token...")
-                try:
-                    from excel_trigger import trigger_excel_token_refresh
-                    trigger_excel_token_refresh(wait_seconds=10)
-                except Exception as e:
-                    logger.warning("[Force Refresh] Failed to trigger Excel: %s", e)
+                if not first_run:
+                    # 🔑 Force refresh: trigger Excel Copilot to generate fresh Token
+                    logger.info("[Force Refresh] Triggering Excel Copilot to refresh Token...")
+                    try:
+                        from excel_trigger import trigger_excel_token_refresh
+                        trigger_excel_token_refresh(wait_seconds=10)
+                    except Exception as e:
+                        logger.warning("[Force Refresh] Failed to trigger Excel: %s", e)
 
                 # Scan + validate + save
                 result = runner.scan_validate_and_save()
                 if result and result.get("jwe"):
-                    logger.info("[Force Refresh] JWE Token updated (len=%d)", len(result["jwe"]))
+                    logger.info("[Token Scan] JWE Token updated (len=%d)", len(result["jwe"]))
                 else:
-                    logger.warning("[Force Refresh] No valid Token acquired, awaiting next cycle")
+                    logger.warning("[Token Scan] No valid Token acquired, awaiting next cycle")
             except Exception as e:
-                logger.error("[Force Refresh] Exception: %s", e)
+                logger.error("[Token Scan] Exception: %s", e)
 
+            first_run = False
             # Wait for next scan (can be interrupted by stop event)
             scan_stop.wait(args.interval)
 
@@ -114,10 +121,6 @@ def main():
 
     # ── Step 3: Start Proxy Server ──
     logger.info("Step 3: Starting proxy server...")
-
-    # Immediate scan to ensure Token is loaded
-    logger.info("Initial Token scan...")
-    runner.scan_validate_and_save()
 
     try:
         import uvicorn
